@@ -1,0 +1,31 @@
+/* Sketcher-aligned defaults (UI_DTM.uss :root + UXML) */
+:root {
+  font-size: 12px;
+  font-family: Arial, "Arial Unicode MS", "Liberation Sans", sans-serif;
+  line-height: 1.2;
+  color-scheme: dark;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+#root {
+  display: flex;
+  flex-direction: column;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+}

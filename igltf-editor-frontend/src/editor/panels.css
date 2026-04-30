@@ -1,0 +1,113 @@
+.hierarchyPanel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  gap: 1px;
+  padding: 4px 0;
+}
+
+.hierarchyRow {
+  display: block;
+  width: 100%;
+  text-align: left;
+  min-height: 25px;
+  padding: 4px 10px;
+  border: none;
+  background: transparent;
+  color: rgb(220, 220, 220);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.hierarchyRow:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.hierarchyRowSelected {
+  background: rgba(255, 170, 42, 0.15);
+  color: rgb(255, 200, 120);
+}
+
+.inspectorPanel {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px;
+}
+
+.inspectorHeaderLabel {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgb(230, 230, 230);
+  margin-bottom: 10px;
+}
+
+.inspectorHint,
+.inspectorHintMuted {
+  color: rgb(160, 160, 160);
+  font-size: 12px;
+  margin: 0;
+}
+
+.inspectorHintMuted {
+  color: rgb(130, 130, 130);
+  margin-top: 8px;
+}
+
+.inspectorFoldout {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.inspectorFoldoutTitle {
+  font-size: 12px;
+  color: rgb(200, 200, 200);
+  letter-spacing: 0.02em;
+}
+
+.vecRow {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.vecLabel {
+  font-size: 11px;
+  color: rgb(170, 170, 170);
+}
+
+.vecCells {
+  display: flex;
+  gap: 6px;
+}
+
+.vecCell {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: 2px;
+}
+
+.vecAxis {
+  font-size: 10px;
+  color: rgb(140, 140, 140);
+}
+
+.vecInput {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 3px 5px;
+  font-size: 12px;
+  border: 1px solid rgb(70, 70, 70);
+  border-radius: 2px;
+  background: rgb(40, 40, 40);
+  color: rgb(235, 235, 235);
+}
+
+.vecInput:focus {
+  outline: 1px solid rgba(255, 170, 42, 0.5);
+  border-color: rgba(255, 170, 42, 0.45);
+}

@@ -1,0 +1,392 @@
+/* US-SK-001 / 002 / 004 — Sketcher UI_DTM-aligned shell */
+
+.editor {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: rgb(36, 36, 36);
+}
+
+.screen {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  justify-content: space-between;
+}
+
+/* —— Top toolbar (29px) —— */
+.toolbar {
+  position: relative;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  height: 29px;
+  min-height: 29px;
+  background-color: rgb(29, 29, 29);
+  color: rgba(255, 170, 42, 0.95);
+}
+
+.toolbarBtn {
+  height: 100%;
+  padding: 0 10px;
+  margin: 0;
+  border: none;
+  background: transparent;
+  color: rgba(255, 170, 42, 0.95);
+  font-size: 14px;
+}
+
+.toolbarBtn:first-of-type {
+  margin-left: 20px;
+}
+
+.fileMenuToolbarSlot {
+  margin-left: 20px;
+  height: 100%;
+  display: flex;
+  align-items: stretch;
+}
+
+.toolbarBtn:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.toolbarBtnActive {
+  background: rgba(255, 170, 42, 0.18);
+  color: rgb(255, 210, 130);
+}
+
+.fileMenuWrap {
+  position: relative;
+  height: 100%;
+  display: flex;
+  align-items: stretch;
+}
+
+.fileMenuHiddenInput {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.fileMenuDropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  min-width: 220px;
+  background: rgb(45, 45, 45);
+  border: 1px solid rgb(55, 55, 55);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+  z-index: 50;
+  padding: 4px 0;
+}
+
+.fileMenuItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  padding: 6px 14px;
+  border: none;
+  background: transparent;
+  color: rgb(235, 235, 235);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fileMenuItem:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.fileMenuShortcut {
+  font-size: 11px;
+  color: rgb(160, 160, 160);
+  margin-left: 16px;
+}
+
+.fileMenuSep {
+  height: 1px;
+  margin: 4px 8px;
+  background: rgb(60, 60, 60);
+}
+
+.projectPath {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  color: rgb(204, 204, 204);
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 120px;
+}
+
+/* —— Window container —— */
+.windowContainer {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.toolbar2 {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  height: 41px;
+  min-height: 41px;
+  background-color: rgb(35, 35, 35);
+  flex-grow: 0;
+  padding-top: 1px;
+  padding-bottom: 1px;
+}
+
+.toolsPlaceholder {
+  flex: 1;
+  padding-left: 8px;
+  color: rgb(160, 160, 160);
+  font-size: 12px;
+}
+
+.serverPlaceholder {
+  padding-right: 12px;
+  color: rgb(120, 120, 120);
+  font-size: 11px;
+}
+
+.mainDisplay {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  justify-content: space-around;
+}
+
+.mainTopDisplay {
+  display: flex;
+  flex-direction: row;
+  flex: 1;
+  min-height: 0;
+  align-items: stretch;
+  justify-content: space-around;
+}
+
+.splitter {
+  flex-shrink: 0;
+  background-color: rgb(36, 36, 36);
+}
+
+.splitterVertical {
+  width: 3px;
+  min-width: 3px;
+  cursor: col-resize;
+}
+
+.splitterHorizontal {
+  height: 3px;
+  min-height: 3px;
+  cursor: row-resize;
+}
+
+.panelHierarchy,
+.panelInspector {
+  display: flex;
+  flex-direction: column;
+  min-width: 100px;
+  max-width: 50%;
+  min-height: 0;
+}
+
+.panelPreview {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 80px;
+  min-height: 0;
+  background-color: rgba(111, 111, 112, 0);
+}
+
+.previewHeader {
+  display: flex;
+  flex-direction: row;
+  justify-content: flex-end;
+  align-items: center;
+  height: 24px;
+  min-height: 24px;
+  max-height: 24px;
+  background-color: rgb(112, 111, 111);
+  padding: 0 4px;
+}
+
+.previewHeaderPlaceholder {
+  font-size: 11px;
+  color: rgb(40, 40, 40);
+}
+
+.previewViewport {
+  flex: 1;
+  min-height: 0;
+  background-color: rgb(75, 75, 76);
+  border: 5px solid transparent;
+  box-sizing: border-box;
+}
+
+.previewViewportCanvasHost {
+  display: flex;
+  flex-direction: column;
+}
+
+.previewViewportCanvasHost canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.assetsRow {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 20%;
+  max-height: 60%;
+  height: 22vh;
+  flex-grow: 0;
+}
+
+.assetsInner {
+  display: flex;
+  flex-direction: row;
+  flex: 1;
+  min-height: 0;
+}
+
+.assetsLibraries {
+  min-width: 10%;
+  max-width: 65%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.assetsTab {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 35%;
+  min-height: 0;
+}
+
+.divisionHeader {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  min-height: 24px;
+  height: 24px;
+  background-color: rgb(111, 111, 112);
+  padding: 0 8px;
+}
+
+.divisionHeader span {
+  font-size: 14px;
+  color: rgb(255, 255, 255);
+  padding-left: 6px;
+}
+
+.panelBody {
+  flex: 1;
+  min-height: 0;
+  background-color: rgb(56, 56, 56);
+  color: rgb(200, 200, 200);
+  font-size: 12px;
+  padding: 8px;
+  overflow: auto;
+}
+
+.inspectorBody {
+  background-color: rgb(52, 52, 52);
+}
+
+.assetsExplorerBody {
+  flex: 1;
+  background-color: rgb(91, 91, 91);
+  min-height: 0;
+  padding: 8px;
+  color: rgb(220, 220, 220);
+}
+
+.assetsFooter {
+  display: flex;
+  flex-direction: row;
+  justify-content: flex-end;
+  align-items: center;
+  min-height: 24px;
+  background-color: rgb(111, 111, 112);
+  padding: 0 4px;
+  gap: 4px;
+}
+
+.footerIconBtn {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  background: rgba(228, 228, 228, 0);
+  opacity: 0.7;
+}
+
+.errorLog {
+  flex-grow: 0;
+  height: 2%;
+  min-height: 20px;
+  background-color: rgb(36, 36, 36);
+  font-size: 14px;
+  display: flex;
+  flex-direction: row;
+  justify-content: flex-end;
+  align-items: center;
+  padding-right: 8px;
+  gap: 6px;
+}
+
+.errorStub {
+  width: 14px;
+  height: 14px;
+  border-radius: 2px;
+  background: rgb(180, 140, 50);
+  flex-shrink: 0;
+}
+
+.errorCount {
+  border: none;
+  border-radius: 7px;
+  background: rgb(70, 70, 70);
+  color: rgb(255, 255, 255);
+  font-size: 12px;
+  padding: 0 6px;
+  min-height: 14px;
+}
+
+.errorMsg {
+  border: none;
+  background: transparent;
+  color: rgb(255, 255, 255);
+  font-size: 12px;
+  max-width: 60vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
