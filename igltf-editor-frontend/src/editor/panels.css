@@ -1,34 +1,3 @@
-.hierarchyPanel {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  gap: 1px;
-  padding: 4px 0;
-}
-
-.hierarchyRow {
-  display: block;
-  width: 100%;
-  text-align: left;
-  min-height: 25px;
-  padding: 4px 10px;
-  border: none;
-  background: transparent;
-  color: rgb(220, 220, 220);
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.hierarchyRow:hover {
-  background: rgba(255, 255, 255, 0.06);
-}
-
-.hierarchyRowSelected {
-  background: rgba(255, 170, 42, 0.15);
-  color: rgb(255, 200, 120);
-}
 
 .inspectorPanel {
   flex: 1;
@@ -110,4 +79,743 @@
 .vecInput:focus {
   outline: 1px solid rgba(255, 170, 42, 0.5);
   border-color: rgba(255, 170, 42, 0.45);
+}
+
+/* —— Hierarchy (tree — hierarchyItem / UI_DTM listView chrome) —— */
+.hierarchyPanelRoot {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  background-color: rgb(56, 56, 56);
+}
+
+/* Let row/label receive dragover+drop; HTML5 DnD often fails to drop when the pointer is over another draggable (the ⋮ handles). */
+.hierarchyPanelRootDragging .hierarchyDragHandle {
+  pointer-events: none;
+}
+
+/** Keep pointer events on the handle that started the drag — disabling it can end the gesture once the cursor leaves the ⋮ strip (Gecko/WebKit/Chromium). */
+.hierarchyPanelRootDragging .hierarchyDragHandle.hierarchyDragHandleDragSource {
+  pointer-events: auto;
+}
+
+/* UI_DTM: hierarchy header + inline search — same chrome as other divisionHeaders */
+.hierarchyPanelTopHeader {
+  flex-shrink: 0;
+  gap: 6px;
+  padding-right: 6px;
+}
+
+.hierarchyPanelTopTitle {
+  font-size: 14px;
+  color: rgb(255, 255, 255);
+  white-space: nowrap;
+}
+
+.hierarchyPanelTopSearchWrap {
+  flex: 1;
+  min-width: 45px;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.hierarchySceneStrip {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 24px;
+  height: 24px;
+  background-color: rgb(70, 70, 70);
+  padding-right: 8px;
+  border-bottom: 1px solid rgb(48, 48, 48);
+}
+
+.hierarchySceneStripLabel {
+  padding-left: 16px;
+  font-size: 14px;
+  color: rgb(255, 255, 255);
+  line-height: 24px;
+}
+
+.hierarchyTreeScroll {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+  padding: 0;
+}
+
+/* —— Hierarchy reorder stripes (Sketcher reorganizationBorder) —— */
+.hierarchyDropLane {
+  height: 5px;
+  margin: 2px 0 1px;
+  border-radius: 1px;
+  background: transparent;
+  box-sizing: border-box;
+}
+
+.hierarchyDropLane:hover:not(.hierarchyDropLaneActive) {
+  background: rgba(255, 170, 42, 0.12);
+}
+
+.hierarchyDropLaneActive {
+  background: rgb(255, 170, 42);
+  box-shadow: 0 0 0 1px rgba(255, 170, 42, 0.35);
+}
+
+
+.hierarchySearchInput {
+  flex: 1;
+  min-width: 0;
+  height: 20px;
+  box-sizing: border-box;
+  padding: 2px 8px;
+  font-size: 12px;
+  border: none;
+  border-radius: 10px;
+  background-color: rgb(35, 35, 35);
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.hierarchySearchInput::placeholder {
+  color: rgb(148, 148, 148);
+}
+
+.hierarchySearchInput:focus {
+  outline: none;
+  box-shadow: 0 0 0 1px rgb(255, 170, 42);
+}
+
+.hierarchyLayerPill {
+  font-size: 11px;
+  color: rgb(190, 190, 190);
+  white-space: nowrap;
+  margin-right: 4px;
+  max-width: 42%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.95;
+  text-align: right;
+}
+
+.hierarchyIsolateTag {
+  color: rgba(255, 170, 42, 0.95);
+}
+
+.hierarchyRowWrap {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  min-height: 25px;
+  gap: 0;
+}
+
+/** Drag-from handle (whole row button is NOT draggable — HTML5 rejects drop-on-draggable reliably). */
+.hierarchyDragHandle,
+.hierarchyDragHandleSpacer {
+  flex-shrink: 0;
+  width: 12px;
+  min-width: 12px;
+  align-self: stretch;
+}
+
+.hierarchyDragHandleSpacer {
+  visibility: hidden;
+}
+
+.hierarchyDragHandle {
+  cursor: grab;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  font-size: 10px;
+  line-height: 1;
+  color: rgb(100, 100, 100);
+}
+
+.hierarchyDragHandle:hover {
+  color: rgb(160, 160, 160);
+}
+
+.hierarchyDragHandle:active {
+  cursor: grabbing;
+}
+
+.hierarchyRowWrap:hover:not(:has(.hierarchyRowSelected)) {
+  background-color: rgb(35, 35, 35);
+}
+
+.hierarchyRowWrap:has(.hierarchyRowSelected) {
+  background: rgba(255, 170, 42, 0.12);
+}
+
+.hierarchyRowWrap:has(.hierarchyRowSelected):hover {
+  background: rgba(255, 170, 42, 0.17);
+}
+
+.hierarchyCaret,
+.hierarchyCaretOpen {
+  width: 14px;
+  min-width: 14px;
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: rgb(142, 142, 142);
+  cursor: pointer;
+  padding: 0;
+  margin-left: 0;
+  font-size: 10px;
+  align-self: center;
+}
+
+.hierarchyCaret::before {
+  content: '\25B8';
+}
+
+.hierarchyCaretOpen::before {
+  content: '\25BE';
+}
+
+.hierarchyCaretSpacer {
+  visibility: hidden;
+}
+
+.hierarchyCaret:disabled {
+  cursor: default;
+  opacity: 0.35;
+  /* Disabled controls can intercept HTML5 drag in some engines; rows need drag target on the wrapper. */
+  pointer-events: none;
+}
+
+.hierarchyIconBtn.hierarchyEyeBtn {
+  flex-shrink: 0;
+  width: 26px;
+  min-width: 26px;
+  border: none;
+  background-color: rgb(35, 35, 35);
+  color: rgba(255, 255, 255, 0.85);
+  cursor: pointer;
+  padding: 0;
+  font-size: 10px;
+  line-height: 1;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.hierarchyEyeBtn:hover {
+  color: rgb(255, 200, 120);
+}
+
+.hierarchyRowBtn {
+  flex: 1;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: rgb(142, 142, 142);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px 6px 4px 10px;
+  min-height: 25px;
+}
+
+.hierarchyRowBtn:hover {
+  background: transparent;
+}
+
+.hierarchyRowSelected {
+  color: rgb(244, 200, 150);
+}
+
+.hierarchyRenameInput {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 12px;
+  padding: 2px 4px;
+  border: 1px solid rgba(255, 170, 42, 0.45);
+  border-radius: 2px;
+  background: rgb(42, 42, 42);
+  color: rgb(235, 235, 235);
+}
+
+/* —— Context menus —— */
+.contextMenu {
+  position: fixed;
+  z-index: 200;
+  min-width: 180px;
+  background: rgb(48, 48, 48);
+  border: 1px solid rgb(65, 65, 65);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+  padding: 4px 0;
+}
+
+.contextMenuElevated {
+  z-index: 220;
+}
+
+.contextMenuItem {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 14px;
+  border: none;
+  background: transparent;
+  color: rgb(228, 228, 228);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.contextMenuItem:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.contextMenuItem.danger {
+  color: rgb(255, 155, 120);
+}
+
+.contextMenuBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 199;
+}
+
+/* —— Assets browser (UI_DTM assetsLibraries / assetsTab) —— */
+.assetsLibrariesBodyInner {
+  font-size: 12px;
+  color: rgb(200, 200, 200);
+}
+
+.catalogBranch {
+  margin-bottom: 1px;
+}
+
+.catalogRowWrap {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+}
+
+.catalogCaret {
+  width: 14px;
+  min-width: 14px;
+  border: none;
+  background: transparent;
+  color: rgb(142, 142, 142);
+  cursor: pointer;
+  padding: 0;
+}
+
+.catalogCaret::before {
+  content: '\25B8';
+}
+
+.catalogCaretOpen::before {
+  content: '\25BE';
+}
+
+.catalogFolderRow,
+.catalogProjectRoot {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: rgb(190, 190, 190);
+  text-align: left;
+  font-size: 12px;
+  padding: 5px 4px;
+  cursor: pointer;
+}
+
+.catalogFolderRow:hover,
+.catalogProjectRoot:hover {
+  background-color: rgb(35, 35, 35);
+}
+
+.catalogPathHint {
+  opacity: 0.55;
+  font-size: 10px;
+}
+
+.assetsExplorerShell {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Same row as Sketcher assetsHeader: path + compact searchInput */
+.assetsExplorerTopHeader {
+  flex-shrink: 0;
+  min-height: 24px;
+  height: auto;
+  padding: 0 4px 0 0;
+  gap: 4px;
+  align-items: center;
+}
+
+.assetsExplorerTopHeader.divisionHeader {
+  height: auto;
+  min-height: 24px;
+}
+
+.hierarchyPanelTopHeader.divisionHeader {
+  flex-shrink: 0;
+}
+
+.assetsExplorerPathRow {
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  flex-direction: row;
+  align-items: center;
+  min-height: 24px;
+  margin-left: 27px;
+  font-size: 14px;
+  color: rgb(255, 255, 255);
+}
+
+.pathExplorerSketch {
+  height: auto;
+  min-height: 24px;
+  margin: 0;
+  padding: 0 3px;
+  border: none;
+  background-color: transparent;
+  color: rgb(255, 255, 255);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.pathExplorerSketch:hover {
+  color: rgb(244, 158, 54);
+}
+
+.breadcrumbSepSketch {
+  opacity: 0.9;
+  color: rgb(255, 255, 255);
+  user-select: none;
+}
+
+.assetsExplorerHeaderSearchWrap {
+  flex-shrink: 0;
+  padding-right: 4px;
+}
+
+.assetsExplorerSearch {
+  width: 120px;
+  max-width: 28vw;
+  box-sizing: border-box;
+  height: 20px;
+  padding: 2px 8px;
+  font-size: 12px;
+  border: none;
+  border-radius: 10px;
+  background-color: rgb(35, 35, 35);
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.assetsExplorerSearch::placeholder {
+  color: rgb(148, 148, 148);
+}
+
+.assetsExplorerSearch:focus {
+  outline: none;
+  box-shadow: 0 0 0 1px rgb(255, 170, 42);
+}
+
+
+.assetsExplorerMiddleRow {
+  display: flex;
+  flex-direction: row;
+  flex: 1;
+  min-height: 0;
+  background: rgb(91, 91, 91);
+}
+
+.assetsExplorerListPane {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.assetsExplorerListScroll {
+  flex: 1;
+  overflow: auto;
+  padding: 12px 10px 10px 20px;
+  border: 2px solid transparent;
+  box-sizing: border-box;
+}
+
+.assetsExplorerVsizer {
+  flex-shrink: 0;
+  width: 2px;
+  align-self: stretch;
+  margin: 8px 0;
+  background-color: rgb(111, 111, 112);
+}
+
+.assetsExplorerPropsPane {
+  width: min(340px, 30%);
+  min-width: 160px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid rgb(111, 111, 112);
+  box-sizing: border-box;
+}
+
+.assetsExplorerPropsHeader {
+  flex-shrink: 0;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px 4px;
+  gap: 6px;
+}
+
+.assetsExplorerPropsTitle {
+  margin: 0;
+  padding: 8px 0 6px 10px;
+  font-size: 14px;
+  font-weight: 400;
+  color: rgb(255, 255, 255);
+}
+
+.assetsPropsOverflowBtn {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 2px;
+  background: transparent;
+  color: rgb(238, 238, 238);
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+  font-size: 16px;
+}
+
+.assetsPropsOverflowBtn:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.assetsPropsOverflowBtn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.assetsPropsPopover {
+  position: absolute;
+  top: calc(100% - 4px);
+  right: 4px;
+  z-index: 80;
+  min-width: 160px;
+  background: rgb(48, 48, 48);
+  border: 1px solid rgb(65, 65, 65);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+  padding: 4px 0;
+}
+
+.assetsPropsPopover .contextMenuItem {
+  padding-left: 12px;
+  padding-right: 12px;
+}
+
+.assetsPropsInner {
+  flex: 1;
+  overflow: auto;
+  padding: 0 12px 12px;
+  min-height: 0;
+}
+
+.assetsPropsPreview {
+  width: 100px;
+  height: 100px;
+  flex-shrink: 0;
+  background-color: rgb(56, 56, 56);
+  border: 1px solid rgb(111, 111, 112);
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: rgb(180, 180, 180);
+}
+
+.assetsPropsRow {
+  display: flex;
+  flex-direction: row;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.assetsPropsTexts {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.assetsPropsPrimary {
+  margin: 0;
+  padding: 0;
+  font-size: 14px;
+  color: rgb(255, 255, 255);
+  word-break: break-word;
+}
+
+.assetsPropsMuted {
+  margin: 0;
+  padding: 0;
+  font-size: 12px;
+  color: rgb(138, 138, 138);
+  word-break: break-all;
+}
+
+.assetsPropsPlaceholder {
+  font-size: 12px;
+  color: rgb(160, 160, 160);
+  padding-left: 4px;
+  padding-right: 4px;
+}
+
+.assetsExplorerListFlat {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.assetsExplorerRowFlat {
+  padding: 5px 8px;
+  margin-bottom: 2px;
+  cursor: grab;
+  color: rgb(220, 220, 220);
+  font-size: 12px;
+  border-radius: 3px;
+  border: 1px solid rgb(103, 103, 103);
+  background-color: rgb(70, 70, 70);
+}
+
+.assetsExplorerRowFlat:hover {
+  background-color: rgb(78, 78, 78);
+}
+
+.assetsExplorerRowFlat:active {
+  cursor: grabbing;
+}
+
+.assetsExplorerRowSelected {
+  border-color: rgb(199, 199, 199);
+  background-color: rgb(103, 103, 103);
+}
+
+.assetLogicalPath {
+  opacity: 0.72;
+  font-size: 10px;
+}
+
+.assetsFooterBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: flex-start;
+  align-items: center;
+  padding: 2px 6px;
+  min-height: 24px;
+  border-top: none;
+  background-color: rgb(111, 111, 112);
+}
+
+.footerToolbarBtn {
+  font-size: 11px;
+  padding: 2px 8px;
+  border: none;
+  border-radius: 2px;
+  background: transparent;
+  color: rgb(255, 255, 255);
+  cursor: pointer;
+}
+
+.footerToolbarBtn:hover {
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.footerToolbarBtn.dangerGhost {
+  color: rgb(255, 214, 180);
+}
+.inspectorInspectorTop {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.inspectorInspectorTop .inspectorHeaderLabel {
+  margin-bottom: 0;
+}
+
+.inspectorToolbar {
+  display: flex;
+  gap: 4px;
+}
+
+.inspectorIconBtn {
+  width: 28px;
+  height: 26px;
+  border: 1px solid rgb(72, 72, 72);
+  border-radius: 2px;
+  background: rgb(42, 42, 42);
+  color: rgb(215, 215, 215);
+  cursor: pointer;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.inspectorIconBtn:hover {
+  background: rgb(50, 50, 50);
+}
+
+.inspectorIconBtn.dangerGhost {
+  border-color: rgba(255, 140, 100, 0.45);
+  color: rgb(255, 170, 130);
+}
+
+.inspectorBoolRow {
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+  color: rgb(200, 200, 200);
+  margin-bottom: 8px;
+}
+
+.inspectorBoolLbl {
+  user-select: none;
+}
+
+.inspectorAssetDropSlot {
+  border: 1px dashed rgba(255, 170, 42, 0.35);
+  border-radius: 4px;
+  padding: 8px;
+  margin-bottom: 10px;
+  font-size: 11px;
+  color: rgb(170, 170, 170);
+  text-align: center;
+}
+
+.inspectorAssetDropSlot:hover {
+  background: rgba(255, 170, 42, 0.06);
 }

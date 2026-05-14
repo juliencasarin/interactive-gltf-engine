@@ -18,6 +18,7 @@ export function FileMenu({ projectBasename }: { projectBasename: string }) {
   const {
     nodes,
     projectAssets,
+    assetFoldersExplicit,
     dirty,
     addGltfFromFile,
     replaceProjectState,
@@ -43,7 +44,7 @@ export function FileMenu({ projectBasename }: { projectBasename: string }) {
 
   const downloadExport = useCallback(() => {
     if (isApiConfigured()) {
-      const doc = toProjectFileV2(nodes, projectAssets)
+      const doc = toProjectFileV2(nodes, projectAssets, assetFoldersExplicit)
       downloadTextFile(
         `${projectBasename || 'project'}.json`,
         JSON.stringify(doc, null, 2),
@@ -53,11 +54,11 @@ export function FileMenu({ projectBasename }: { projectBasename: string }) {
     }
     markSavedBaseline()
     closeMenu()
-  }, [projectBasename, nodes, projectAssets, markSavedBaseline, closeMenu])
+  }, [projectBasename, nodes, projectAssets, assetFoldersExplicit, markSavedBaseline, closeMenu])
 
   const downloadExportBackup = useCallback(() => {
     if (isApiConfigured()) {
-      const doc = toProjectFileV2(nodes, projectAssets)
+      const doc = toProjectFileV2(nodes, projectAssets, assetFoldersExplicit)
       downloadTextFile(
         `${projectBasename || 'project'}-backup.json`,
         JSON.stringify(doc, null, 2),
@@ -66,7 +67,7 @@ export function FileMenu({ projectBasename }: { projectBasename: string }) {
       downloadTextFile(`${projectBasename || 'project'}-backup.json`, serializeProjectV1(nodes))
     }
     closeMenu()
-  }, [projectBasename, nodes, projectAssets, closeMenu])
+  }, [projectBasename, nodes, projectAssets, assetFoldersExplicit, closeMenu])
 
   const save = useCallback(async () => {
     if (isApiConfigured()) {
@@ -96,41 +97,63 @@ export function FileMenu({ projectBasename }: { projectBasename: string }) {
       const text = await file.text()
       const parsed = parseAnyProjectFile(text)
       const rootId = parsed.nodes.find((n) => n.parentId === null)?.id ?? null
-      replaceProjectState(parsed.nodes, parsed.assets, { markClean: true, selectionId: rootId })
+      replaceProjectState(parsed.nodes, parsed.assets, {
+        markClean: true,
+        selectionId: rootId,
+        assetFolders: parsed.assetFolders,
+      })
       closeMenu()
     },
     [replaceProjectState, closeMenu],
   )
 
   const importGltfFiles = useCallback(
-    async (files: FileList | File[]) => {
-      const list = Array.from(files).filter((f) => isGltfName(f.name))
-      for (const f of list) {
-        await addGltfFromFile(f)
+    async (files: readonly File[]) => {
+      const list = files.filter((f) => isGltfName(f.name))
+      if (files.length > 0 && list.length === 0) {
+        window.alert('No .glb / .gltf file in the selection.')
       }
-      if (list.length) closeMenu()
+      try {
+        for (const f of list) {
+          await addGltfFromFile(f)
+        }
+      } catch (e) {
+        window.alert(e instanceof Error ? e.message : String(e))
+      } finally {
+        closeMenu()
+      }
     },
     [addGltfFromFile, closeMenu],
   )
 
   const onProjectInputChange = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0]
-      e.target.value = ''
+      const input = e.target
+      const file = input.files?.[0]
       if (!file) return
       const lower = file.name.toLowerCase()
-      if (lower.endsWith('.json')) await loadProjectFile(file)
-      else if (isGltfName(file.name)) await importGltfFiles([file])
-      else window.alert('Open: choose a .json project or a .glb / .gltf file.')
+      try {
+        if (lower.endsWith('.json')) await loadProjectFile(file)
+        else if (isGltfName(file.name)) await importGltfFiles([file])
+        else window.alert('Open: choose a .json project or a .glb / .gltf file.')
+      } finally {
+        input.value = ''
+      }
     },
     [loadProjectFile, importGltfFiles],
   )
 
   const onImportInputChange = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const files = e.target.files
-      e.target.value = ''
-      if (files?.length) await importGltfFiles(files)
+      const input = e.target
+      const raw = input.files
+      if (!raw?.length) return
+      const picked = Array.from(raw)
+      try {
+        await importGltfFiles(picked)
+      } finally {
+        input.value = ''
+      }
     },
     [importGltfFiles],
   )

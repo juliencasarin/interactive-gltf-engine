@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { FileMenu } from '@/editor/FileMenu'
 import { useEditor } from '@/editor/EditorContext'
+import { AssetsCatalogTree, AssetsExplorerPanel } from '@/editor/AssetsPanel'
 import { HierarchyPanel } from '@/editor/HierarchyPanel'
 import { InspectorPanel } from '@/editor/InspectorPanel'
 import { PreviewViewport } from '@/editor/PreviewViewport'
@@ -173,8 +174,13 @@ export function EditorShell({ sceneId }: EditorShellProps) {
       const files = e.dataTransfer.files
       if (!files?.length) return
       const gltfs = Array.from(files).filter((f) => isGltfName(f.name))
-      for (const f of gltfs) {
-        await addGltfFromFile(f)
+      if (!gltfs.length) return
+      try {
+        for (const f of gltfs) {
+          await addGltfFromFile(f)
+        }
+      } catch (err) {
+        window.alert(err instanceof Error ? err.message : String(err))
       }
     },
     [addGltfFromFile],
@@ -212,9 +218,6 @@ export function EditorShell({ sceneId }: EditorShellProps) {
                 className="panelHierarchy"
                 style={{ width: hierarchyW, flexShrink: 0 }}
               >
-                <div className="divisionHeader">
-                  <span>Hierarchy</span>
-                </div>
                 <HierarchyPanel />
               </div>
 
@@ -270,7 +273,9 @@ export function EditorShell({ sceneId }: EditorShellProps) {
                   <div className="divisionHeader">
                     <span>Assets</span>
                   </div>
-                  <div className="panelBody">Libraries (placeholder)</div>
+                  <div className="catalogLibrariesHost">
+                    <AssetsCatalogTree />
+                  </div>
                 </div>
 
                 <div
@@ -280,19 +285,8 @@ export function EditorShell({ sceneId }: EditorShellProps) {
                   onMouseDown={startLibrariesDrag}
                 />
 
-                <div className="assetsTab">
-                  <div className="divisionHeader">
-                    <span>Assets explorer</span>
-                  </div>
-                  <div className="assetsExplorerBody" />
-                  <div className="assetsFooter">
-                    <button type="button" className="footerIconBtn" aria-label="Stub">
-                      ▢
-                    </button>
-                    <button type="button" className="footerIconBtn" aria-label="Stub">
-                      ○
-                    </button>
-                  </div>
+                <div className="assetsTab assetsTabFilled">
+                  <AssetsExplorerPanel />
                 </div>
               </div>
             </div>

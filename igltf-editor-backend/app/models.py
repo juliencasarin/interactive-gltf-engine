@@ -9,6 +9,7 @@ class ProjectAsset(BaseModel):
     assetId: str
     relativePath: str
     name: str | None = None
+    logicalFolder: str | None = None
 
 
 class SceneNode(BaseModel):
@@ -19,6 +20,8 @@ class SceneNode(BaseModel):
     rotation: list[float]
     scale: list[float]
     assetRef: str | None = None
+    visible: bool | None = None
+    layerId: str | None = None
 
     @field_validator("position", "rotation", "scale")
     @classmethod
@@ -37,6 +40,7 @@ class ProjectDocumentV2(BaseModel):
     version: Literal[2] = 2
     scene: Scene
     assets: list[ProjectAsset] = Field(default_factory=list)
+    assetFolders: list[str] = Field(default_factory=list)
 
 
 class AssetUploadResponse(BaseModel):

@@ -61,7 +61,7 @@ Assume configurable **`STORAGE_ROOT`**. For project id **`{projectId}`** (e.g. r
 | Method | Path | Behavior |
 |--------|------|----------|
 | `GET` | `/projects/{id}/document` | Return **`project.json`** body (JSON). `404` if missing. |
-| `PUT` | `/projects/{id}/document` | Replace **entire** document. Body = v2 JSON. Validate `format` + `version` + shape; **require** the set of **`scene.assetRef`** (non-null) to **equal** the set of **`assets[].assetId`**. On success: **move** **`_staging/{assetId}.*` → `assets/{assetId}.*`**, **delete** unreferenced files under **`assets/`**, **clear** **`_staging`**, write normalized **`project.json`**. Response **`{"status":"ok","document": …}`** — client should apply returned **`document`**. |
+| `PUT` | `/projects/{id}/document` | Replace **entire** document. Body = v2 JSON. Validate `format` + `version` + shape; require every non-null **`scene.assetRef`** to exist in **`assets[].assetId`** (**`assets[]`** may list **extra** catalog entries not yet referenced by the scene). On success: **move** **`_staging/{assetId}.*` → `assets/{assetId}.*`**, **delete** files under **`assets/`** that are not listed in **`assets[]`**, **clear** **`_staging`**, write normalized **`project.json`**. Response **`{"status":"ok","document": …}`** — client should apply returned **`document`**. |
 | `POST` | `/projects/{id}/assets/stage` | **Multipart**: one file → **`_staging/{uuid}.glb|.gltf`**, return **`assetId`**, **`relativePath`**, **`url`** (`/files/{id}/…`) for preview; final **`assets/`** only after **`PUT /document`**. |
 | `GET` | `/files/{id}/...` | Static serving: **`project.json`**, **`assets/*`**, **`_staging/*`**, and later build artifacts. |
 
@@ -105,7 +105,7 @@ Assume configurable **`STORAGE_ROOT`**. For project id **`{projectId}`** (e.g. r
 |------|----------|
 | **Open editor `/editor/:id`** | On mount: `GET /projects/{id}/document`. If 404, optionally seed empty v2 (or show “new project” — product choice). |
 | **Save** | Serialize v2 (only assets still referenced in the scene); `PUT` document; replace state with returned **`document`**. Clear dirty after success. |
-| **Import glTF** | `POST …/assets/stage` → `assetId` + URL → append to `assets[]`, add node with `assetRef`; preview may use **`_staging`** URL until save. |
+| **Import glTF** | `POST …/assets/stage` → **`assets[]`** entry + `PUT /document` promotes to **`assets/`**; user places in scene by adding a node referencing `assetRef` (e.g. drag from asset list to preview). |
 | **Drag-drop** | Same as import (upload then reference). |
 | **Offline / dev without API** | Keep **download/upload v1** as fallback behind a flag or if `VITE_API_BASE_URL` unset (optional; simplifies local Three hacking). |
 
@@ -140,7 +140,7 @@ Assume configurable **`STORAGE_ROOT`**. For project id **`{projectId}`** (e.g. r
 
 1. **Backend**: scaffold FastAPI + disk layout + `GET/PUT` document + `POST …/assets/stage` + apply-on-`PUT` (promote/prune) + static `GET /files/...`.
 2. **Frontend**: `projectApi` + v2 types + load on mount + Save → PUT (apply returned `document`).
-3. **Frontend**: import/drop → `POST …/assets/stage` + scene nodes with `assetRef` + preview URLs; persisted assets load via **`GET`** after reload.
+3. **Frontend**: import/drop → `POST …/assets/stage` + full **`assets[]`** catalog in **`PUT`**; add scene nodes with **`assetRef`** when user places (drag from assets → preview); persisted assets load via **`GET`** after reload.
 4. **Polish**: export v2 download, v1→v2 import path (optional), error UI and CORS docs in READMEs.
 
 ---

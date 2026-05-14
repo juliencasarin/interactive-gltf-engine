@@ -1,4 +1,20 @@
 import type { EditorNode, ProjectAssetEntry, ProjectFileV1, ProjectFileV2, SceneNodeV2, Vec3 } from './types'
+import { normalizeLogicalFolder } from './folderUtils'
+
+function editorNodeToSceneNodeV2(n: EditorNode): SceneNodeV2 {
+  const out: SceneNodeV2 = {
+    id: n.id,
+    name: n.name,
+    parentId: n.parentId,
+    position: n.position,
+    rotation: n.rotation,
+    scale: n.scale,
+  }
+  if (n.assetRef) out.assetRef = n.assetRef
+  if (n.visible === false) out.visible = false
+  if (n.layerId) out.layerId = n.layerId
+  return out
+}
 
 export function serializeProjectV1(nodes: EditorNode[]): string {
   const doc: ProjectFileV1 = {
@@ -27,35 +43,26 @@ export function assetsReferencedInScene(
   return all.filter((a) => ids.has(a.assetId))
 }
 
-export function toProjectFileV2(nodes: EditorNode[], assets: ProjectAssetEntry[]): ProjectFileV2 {
-  const sceneNodes: SceneNodeV2[] = nodes.map((n) => {
-    const { id, name, parentId, position, rotation, scale, assetRef } = n
-    if (!assetRef) {
-      return {
-        id,
-        name,
-        parentId,
-        position,
-        rotation,
-        scale,
-      }
-    }
-    return {
-      id,
-      name,
-      parentId,
-      position,
-      rotation,
-      scale,
-      assetRef,
-    }
-  })
-  return {
+export function toProjectFileV2(
+  nodes: EditorNode[],
+  assets: ProjectAssetEntry[],
+  assetFoldersExplicit?: string[],
+): ProjectFileV2 {
+  const sceneNodes = nodes.map(editorNodeToSceneNodeV2)
+  const doc: ProjectFileV2 = {
     format: 'igltf-editor-project',
     version: 2,
     scene: { nodes: sceneNodes },
-    assets: assets.map((a) => ({ ...a })),
+    assets: assets.map((a) => ({
+      assetId: a.assetId,
+      relativePath: a.relativePath,
+      name: a.name,
+      ...(a.logicalFolder ? { logicalFolder: normalizeLogicalFolder(a.logicalFolder) } : {}),
+    })),
   }
+  const af = [...new Set((assetFoldersExplicit ?? []).map(normalizeLogicalFolder).filter(Boolean))].sort()
+  if (af.length) doc.assetFolders = af
+  return doc
 }
 
 export function parseProjectJsonV2(text: string): ProjectFileV2 {
@@ -74,6 +81,7 @@ export function parseProjectJsonV2(text: string): ProjectFileV2 {
 export function parseAnyProjectFile(text: string): {
   nodes: EditorNode[]
   assets: ProjectAssetEntry[]
+  assetFolders: string[]
 } {
   const raw = JSON.parse(text) as Record<string, unknown>
   if (!raw || raw.format !== 'igltf-editor-project') throw new Error('Invalid project file')
@@ -86,13 +94,26 @@ export function parseAnyProjectFile(text: string): {
       position: triple(n.position as number[]),
       rotation: triple(n.rotation as number[]),
       scale: triple(n.scale as number[]),
-      assetRef: n.assetRef,
+      ...(n.assetRef ? { assetRef: n.assetRef } : {}),
+      ...(n.visible === false ? { visible: false as const } : {}),
+      ...(n.layerId ? { layerId: n.layerId } : {}),
     }))
-    return { nodes, assets: doc.assets }
+    const foldersRaw = Array.isArray((doc as ProjectFileV2).assetFolders)
+      ? ((doc as ProjectFileV2).assetFolders as string[])
+      : []
+    const assetFolders = [...new Set(foldersRaw.map(normalizeLogicalFolder).filter(Boolean))].sort()
+    return {
+      nodes,
+      assets: doc.assets.map((a) => ({
+        ...a,
+        ...(a.logicalFolder ? { logicalFolder: normalizeLogicalFolder(a.logicalFolder) } : {}),
+      })),
+      assetFolders,
+    }
   }
   if (raw.version === 1) {
     const doc = parseProjectJsonV1(text)
-    return { nodes: doc.nodes, assets: [] }
+    return { nodes: doc.nodes, assets: [], assetFolders: [] }
   }
   throw new Error(`Unsupported project version: ${String(raw.version)}`)
 }

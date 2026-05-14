@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.apply_document import apply_and_persist_project
-from app.models import AssetUploadResponse, ProjectDocumentV2
+from app.models import AssetUploadResponse, ProjectDocumentV2, Scene, SceneNode
 from app.storage import (
     ensure_project_layout,
     file_url,
@@ -26,6 +26,23 @@ from app.storage import (
 )
 
 _MAX_UPLOAD_MB = int(os.environ.get("MAX_UPLOAD_MB", "200"))
+
+# Returned when project.json does not exist yet (not persisted until first PUT).
+_SYNTHETIC_PROJECT_DOCUMENT_V2 = ProjectDocumentV2(
+    scene=Scene(
+        nodes=[
+            SceneNode(
+                id="root",
+                name="Scene",
+                parentId=None,
+                position=[0.0, 0.0, 0.0],
+                rotation=[0.0, 0.0, 0.0],
+                scale=[1.0, 1.0, 1.0],
+            )
+        ]
+    ),
+    assets=[],
+)
 
 
 def _cors_origins() -> list[str]:
@@ -54,9 +71,13 @@ def health() -> dict[str, str]:
 
 @app.get("/projects/{project_id}/document")
 def get_document(project_id: str) -> JSONResponse:
+    try:
+        ensure_project_layout(project_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     path = project_json_path(project_id)
     if not path.is_file():
-        raise HTTPException(status_code=404, detail="project document not found")
+        return JSONResponse(content=_SYNTHETIC_PROJECT_DOCUMENT_V2.model_dump(mode="json"))
     try:
         text = path.read_text(encoding="utf-8")
         data = json.loads(text)

@@ -9,12 +9,18 @@ export type SceneNodeV2 = {
   rotation: Vec3
   scale: Vec3
   assetRef?: string
+  /** Omitted means visible (Sketch parity default). */
+  visible?: boolean
+  /** Scene / layer tagging (minimal v1 parity). */
+  layerId?: string
 }
 
 export type ProjectAssetEntry = {
   assetId: string
   relativePath: string
   name?: string
+  /** Virtual path under catalog (segments joined by `/`, no leading slash). */
+  logicalFolder?: string
 }
 
 /** In-memory editor node: server `assetRef` and/or local preview `gltfDataUrl`. */
@@ -27,6 +33,8 @@ export type EditorNode = {
   scale: Vec3
   gltfDataUrl?: string
   assetRef?: string
+  visible?: boolean
+  layerId?: string
 }
 
 export type PanelFocus = 'viewport' | 'hierarchy' | 'assets' | 'inspector'
@@ -42,4 +50,6 @@ export type ProjectFileV2 = {
   version: 2
   scene: { nodes: SceneNodeV2[] }
   assets: ProjectAssetEntry[]
+  /** Empty virtual folders persisted under the asset catalog (Sketch `FolderItem` parity). */
+  assetFolders?: string[]
 }

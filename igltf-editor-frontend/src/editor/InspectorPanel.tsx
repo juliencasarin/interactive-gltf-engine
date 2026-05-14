@@ -41,7 +41,15 @@ function VecField({
 }
 
 export function InspectorPanel() {
-  const { nodes, selectionId, updateNode, setPanelFocus } = useEditor()
+  const {
+    nodes,
+    selectionId,
+    updateNode,
+    setPanelFocus,
+    deleteSceneSubtreesConfirm,
+    duplicateSceneNode,
+    projectAssets,
+  } = useEditor()
 
   const node = useMemo(
     () => nodes.find((n) => n.id === selectionId) ?? null,
@@ -50,13 +58,68 @@ export function InspectorPanel() {
 
   return (
     <div className="inspectorPanel" onMouseDown={() => setPanelFocus('inspector')}>
-      <div className="inspectorHeaderLabel">
-        {node ? node.name : 'Nothing selected'}
+      <div className="inspectorInspectorTop">
+        <div className="inspectorHeaderLabel">
+          {node ? node.name : 'Nothing selected'}
+        </div>
+        {node && node.id !== 'root' ? (
+          <div className="inspectorToolbar">
+            <button
+              type="button"
+              className="inspectorIconBtn dangerGhost"
+              title="Delete selection"
+              aria-label="Delete selection"
+              onClick={() => deleteSceneSubtreesConfirm([node.id])}
+            >
+              🗑
+            </button>
+            <button
+              type="button"
+              className="inspectorIconBtn"
+              title="Duplicate"
+              aria-label="Duplicate selection"
+              onClick={() => duplicateSceneNode(node.id)}
+            >
+              ⧉
+            </button>
+          </div>
+        ) : null}
       </div>
       {!node ? (
         <p className="inspectorHint">Select an object in the viewport or hierarchy.</p>
       ) : (
         <div className="inspectorFoldout">
+          <label className="inspectorBoolRow">
+            <input
+              type="checkbox"
+              checked={node.visible !== false}
+              onChange={() =>
+                updateNode(node.id, { visible: node.visible === false ? undefined : false })
+              }
+            />
+            <span className="inspectorBoolLbl">Visible in viewport</span>
+          </label>
+          {!node.assetRef && !node.gltfDataUrl ? (
+            <div
+              className="inspectorAssetDropSlot"
+              onDragOver={(e) => {
+                if ([...e.dataTransfer.types].includes('application/x-igltf-asset')) {
+                  e.preventDefault()
+                  e.dataTransfer.dropEffect = 'copy'
+                }
+              }}
+              onDrop={(e) => {
+                e.preventDefault()
+                const aid =
+                  e.dataTransfer.getData('application/x-igltf-asset') ||
+                  e.dataTransfer.getData('text/plain').trim()
+                if (!aid || !projectAssets.some((a) => a.assetId === aid)) return
+                updateNode(node.id, { assetRef: aid })
+              }}
+            >
+              Drop project glTF here to attach (Sketch DragAssetInput — US-SK-073)
+            </div>
+          ) : null}
           <div className="inspectorFoldoutTitle">Transform</div>
           <VecField
             label="Position"

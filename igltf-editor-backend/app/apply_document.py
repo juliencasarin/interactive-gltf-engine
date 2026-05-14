@@ -25,10 +25,11 @@ def apply_and_persist_project(project_id: str, body: ProjectDocumentV2) -> Proje
 
     refs = {n.assetRef for n in body.scene.nodes if n.assetRef}
     cats = {a.assetId for a in body.assets}
-    if refs != cats:
+    orphans = refs - cats
+    if orphans:
         raise HTTPException(
             status_code=400,
-            detail=f"assets[] must match scene assetRef set exactly: scene={sorted(refs)} catalog={sorted(cats)}",
+            detail=f"scene references unknown asset ids (missing from assets[]): {sorted(orphans)}",
         )
 
     staging = staging_dir(project_id)
@@ -58,7 +59,12 @@ def apply_and_persist_project(project_id: str, body: ProjectDocumentV2) -> Proje
                 dest.unlink()
             shutil.move(str(src), str(dest))
             normalized_assets.append(
-                ProjectAsset(assetId=a.assetId, relativePath=dest_rel, name=a.name),
+                ProjectAsset(
+                    assetId=a.assetId,
+                    relativePath=dest_rel,
+                    name=a.name,
+                    logicalFolder=a.logicalFolder,
+                ),
             )
             referenced_final.add(dest_rel)
         elif rel.startswith("assets/"):
@@ -89,6 +95,10 @@ def apply_and_persist_project(project_id: str, body: ProjectDocumentV2) -> Proje
             if f.is_file():
                 f.unlink()
 
-    out = ProjectDocumentV2(scene=body.scene, assets=normalized_assets)
+    out = ProjectDocumentV2(
+        scene=body.scene,
+        assets=normalized_assets,
+        assetFolders=list(body.assetFolders or []),
+    )
     project_json_path(project_id).write_text(out.model_dump_json(indent=2), encoding="utf-8")
     return out

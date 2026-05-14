@@ -288,6 +288,18 @@
   min-height: 0;
 }
 
+.assetsTabFilled {
+  min-height: 0;
+}
+
+.catalogLibrariesHost {
+  flex: 1;
+  min-height: 0;
+  padding: 2px 4px;
+  overflow: auto;
+  background-color: rgb(52, 52, 52);
+}
+
 .divisionHeader {
   display: flex;
   flex-direction: row;
@@ -302,7 +314,7 @@
 .divisionHeader span {
   font-size: 14px;
   color: rgb(255, 255, 255);
-  padding-left: 6px;
+  padding-left: 14px;
 }
 
 .panelBody {
@@ -325,6 +337,27 @@
   min-height: 0;
   padding: 8px;
   color: rgb(220, 220, 220);
+}
+
+.assetsExplorerEmpty {
+  opacity: 0.72;
+}
+
+.assetsExplorerList {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+.assetsExplorerList li {
+  margin-bottom: 2px;
+}
+
+.assetsExplorerRow {
+  cursor: grab;
+}
+
+.assetsExplorerRow:active {
+  cursor: grabbing;
 }
 
 .assetsFooter {
