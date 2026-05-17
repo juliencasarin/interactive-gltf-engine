@@ -1,5 +1,69 @@
-import type { EditorNode, ProjectAssetEntry, ProjectFileV1, ProjectFileV2, SceneNodeV2, Vec3 } from './types'
+import type {
+  EditorNode,
+  InteractionScriptAttachment,
+  InteractionSerializedPropsMap,
+  ProjectAssetEntry,
+  ProjectFileV1,
+  ProjectFileV2,
+  SceneNodeV2,
+  Vec3,
+} from './types'
 import { normalizeLogicalFolder } from './folderUtils'
+
+/** Accept only JSON-serializable primitives per `InteractionSerializedPropsMap`. */
+export function safeInteractionSerializedProps(raw: unknown): InteractionSerializedPropsMap | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  const o = raw as Record<string, unknown>
+  const out: InteractionSerializedPropsMap = {}
+  for (const [k, v] of Object.entries(o)) {
+    if (v === null) {
+      out[k] = null
+      continue
+    }
+    const t = typeof v
+    if (t === 'string' || t === 'number' || t === 'boolean') out[k] = v as string | number | boolean
+  }
+  return Object.keys(out).length ? out : undefined
+}
+
+export function newAttachmentId(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `a_${Math.random().toString(36).slice(2)}`
+}
+
+function parseAttachmentFromDisk(raw: unknown): InteractionScriptAttachment | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const o = raw as Record<string, unknown>
+  const scriptAssetRef = typeof o.scriptAssetRef === 'string' ? o.scriptAssetRef : ''
+  if (!scriptAssetRef) return null
+  const id = typeof o.id === 'string' && o.id ? o.id : newAttachmentId()
+  const serializedProps = safeInteractionSerializedProps(o.serializedProps)
+  const a: InteractionScriptAttachment = { id, scriptAssetRef }
+  if (serializedProps) a.serializedProps = serializedProps
+  return a
+}
+
+/** Migrate legacy singular interaction fields + parse `interactionAttachments` from disk JSON. */
+export function interactionAttachmentsFromDiskNode(raw: Record<string, unknown>): InteractionScriptAttachment[] | undefined {
+  const out: InteractionScriptAttachment[] = []
+  const arr = raw.interactionAttachments
+  if (Array.isArray(arr)) {
+    for (const item of arr) {
+      const a = parseAttachmentFromDisk(item)
+      if (a) out.push(a)
+    }
+  }
+  if (out.length) return out
+
+  const legacyRef = raw.interactionScriptAssetRef
+  if (typeof legacyRef === 'string' && legacyRef) {
+    const a: InteractionScriptAttachment = { id: newAttachmentId(), scriptAssetRef: legacyRef }
+    const sp = safeInteractionSerializedProps(raw.interactionSerializedProps)
+    if (sp) a.serializedProps = sp
+    return [a]
+  }
+
+  return undefined
+}
 
 function editorNodeToSceneNodeV2(n: EditorNode): SceneNodeV2 {
   const out: SceneNodeV2 = {
@@ -13,6 +77,17 @@ function editorNodeToSceneNodeV2(n: EditorNode): SceneNodeV2 {
   if (n.assetRef) out.assetRef = n.assetRef
   if (n.visible === false) out.visible = false
   if (n.layerId) out.layerId = n.layerId
+  if (n.interactionAttachments?.length) {
+    out.interactionAttachments = n.interactionAttachments.map((a) => {
+      const row: InteractionScriptAttachment = {
+        id: a.id,
+        scriptAssetRef: a.scriptAssetRef,
+      }
+      if (a.serializedProps && Object.keys(a.serializedProps).length > 0)
+        row.serializedProps = { ...a.serializedProps }
+      return row
+    })
+  }
   return out
 }
 
@@ -58,6 +133,11 @@ export function toProjectFileV2(
       relativePath: a.relativePath,
       name: a.name,
       ...(a.logicalFolder ? { logicalFolder: normalizeLogicalFolder(a.logicalFolder) } : {}),
+      ...(a.assetKind ? { assetKind: a.assetKind } : {}),
+      ...(a.scriptRole ? { scriptRole: a.scriptRole } : {}),
+      ...(a.interactionKind ? { interactionKind: a.interactionKind } : {}),
+      ...(a.sourceText !== undefined && a.sourceText !== '' ? { sourceText: a.sourceText } : {}),
+      ...(a.scriptExports?.length ? { scriptExports: [...a.scriptExports] } : {}),
     })),
   }
   const af = [...new Set((assetFoldersExplicit ?? []).map(normalizeLogicalFolder).filter(Boolean))].sort()
@@ -78,6 +158,26 @@ export function parseProjectJsonV2(text: string): ProjectFileV2 {
   return o as unknown as ProjectFileV2
 }
 
+function editorNodeFromSceneLike(raw: Record<string, unknown>, vecs: {
+  position: Vec3
+  rotation: Vec3
+  scale: Vec3
+}): EditorNode {
+  const attachments = interactionAttachmentsFromDiskNode(raw)
+  return {
+    id: raw.id as string,
+    name: raw.name as string,
+    parentId: (raw.parentId ?? null) as string | null,
+    position: vecs.position,
+    rotation: vecs.rotation,
+    scale: vecs.scale,
+    ...(typeof raw.assetRef === 'string' ? { assetRef: raw.assetRef } : {}),
+    ...(raw.visible === false ? { visible: false as const } : {}),
+    ...(typeof raw.layerId === 'string' ? { layerId: raw.layerId } : {}),
+    ...(attachments?.length ? { interactionAttachments: attachments } : {}),
+  }
+}
+
 export function parseAnyProjectFile(text: string): {
   nodes: EditorNode[]
   assets: ProjectAssetEntry[]
@@ -87,17 +187,13 @@ export function parseAnyProjectFile(text: string): {
   if (!raw || raw.format !== 'igltf-editor-project') throw new Error('Invalid project file')
   if (raw.version === 2) {
     const doc = parseProjectJsonV2(text)
-    const nodes: EditorNode[] = doc.scene.nodes.map((n) => ({
-      id: n.id,
-      name: n.name,
-      parentId: n.parentId,
-      position: triple(n.position as number[]),
-      rotation: triple(n.rotation as number[]),
-      scale: triple(n.scale as number[]),
-      ...(n.assetRef ? { assetRef: n.assetRef } : {}),
-      ...(n.visible === false ? { visible: false as const } : {}),
-      ...(n.layerId ? { layerId: n.layerId } : {}),
-    }))
+    const nodes: EditorNode[] = doc.scene.nodes.map((n) =>
+      editorNodeFromSceneLike(n as unknown as Record<string, unknown>, {
+        position: triple(n.position as number[]),
+        rotation: triple(n.rotation as number[]),
+        scale: triple(n.scale as number[]),
+      }),
+    )
     const foldersRaw = Array.isArray((doc as ProjectFileV2).assetFolders)
       ? ((doc as ProjectFileV2).assetFolders as string[])
       : []
@@ -113,7 +209,15 @@ export function parseAnyProjectFile(text: string): {
   }
   if (raw.version === 1) {
     const doc = parseProjectJsonV1(text)
-    return { nodes: doc.nodes, assets: [], assetFolders: [] }
+    const nodes: EditorNode[] = doc.nodes.map((n) => {
+      const o = n as unknown as Record<string, unknown>
+      return editorNodeFromSceneLike(o, {
+        position: triple(o.position as number[]),
+        rotation: triple(o.rotation as number[]),
+        scale: triple(o.scale as number[]),
+      })
+    })
+    return { nodes, assets: [], assetFolders: [] }
   }
   throw new Error(`Unsupported project version: ${String(raw.version)}`)
 }
@@ -131,6 +235,15 @@ export function downloadTextFile(filename: string, text: string) {
   a.download = filename
   a.click()
   URL.revokeObjectURL(url)
+}
+
+export function readFileAsText(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader()
+    r.onload = () => resolve(String(r.result))
+    r.onerror = () => reject(r.error)
+    r.readAsText(file, 'UTF-8')
+  })
 }
 
 export function readFileAsDataUrl(file: File): Promise<string> {

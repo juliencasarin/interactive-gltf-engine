@@ -31,6 +31,8 @@ MANIFEST
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
 *.spec
+# Pinned spec for igltf-desktop bundle (do not ignore)
+!igltf-editor-backend/scripts/igltf-backend.spec
 
 # Installer logs
 pip-log.txt

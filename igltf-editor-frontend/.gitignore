@@ -3,3 +3,12 @@ dist
 *.local
 .DS_Store
 .env
+
+# Packaged backend (PyInstaller one-folder output); keep directory with .gitkeep only
+/resources/igltf-backend/*
+!/resources/igltf-backend/.gitkeep
+
+# Optional source image used to regenerate icons via `npx tauri icon`
+/app-icon.png
+
+

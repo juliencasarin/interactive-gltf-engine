@@ -8,10 +8,26 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { fetchDocument, isApiConfigured, putDocument, uploadAssetStage } from '@/api/projectApi'
+import {
+  assetsWatchUrl,
+  fetchDocument,
+  isApiConfigured,
+  putDocument,
+  uploadAssetStage,
+} from '@/api/projectApi'
+import { buildInteractionScriptTemplate, type InteractionTemplateKind } from '@/scriptRuntime/interactionScriptTemplates'
 import { normalizeFolderSegments, normalizeLogicalFolder } from './folderUtils'
-import { readFileAsDataUrl, toProjectFileV2 } from './projectIo'
-import type { EditorNode, PanelFocus, ProjectAssetEntry, ProjectFileV2, Vec3 } from './types'
+import { readFileAsDataUrl, readFileAsText, interactionAttachmentsFromDiskNode, newAttachmentId, toProjectFileV2 } from './projectIo'
+import type { EditorNode, InteractionScriptAttachment, PanelFocus, ProjectAssetEntry, ProjectFileV2, Vec3 } from './types'
+import { inferAssetKindFromPath, isGltfAssetEntry } from './assetUtils'
+
+function stripEphemeralScriptSources(assets: ProjectAssetEntry[]): ProjectAssetEntry[] {
+  return assets.map((a) => {
+    if (a.sourceText === undefined) return a
+    const { sourceText: _st, ...rest } = a
+    return rest
+  })
+}
 
 function uid(): string {
   return globalThis.crypto?.randomUUID?.() ?? `n_${Math.random().toString(36).slice(2)}`
@@ -125,12 +141,21 @@ function docToEditorState(doc: ProjectFileV2): {
     ...(n.assetRef ? { assetRef: n.assetRef } : {}),
     ...(n.visible === false ? { visible: false as const } : {}),
     ...(n.layerId ? { layerId: n.layerId } : {}),
+    ...(() => {
+      const att = interactionAttachmentsFromDiskNode(n as unknown as Record<string, unknown>)
+      return att?.length ? { interactionAttachments: att } : {}
+    })(),
   }))
   const assets: ProjectAssetEntry[] = doc.assets.map((a) => ({
     assetId: a.assetId,
     relativePath: a.relativePath,
     name: a.name,
     ...(a.logicalFolder ? { logicalFolder: normalizeLogicalFolder(a.logicalFolder) } : {}),
+    ...(a.assetKind ? { assetKind: a.assetKind } : {}),
+    ...(a.scriptRole ? { scriptRole: a.scriptRole } : {}),
+    ...(a.interactionKind ? { interactionKind: a.interactionKind } : {}),
+    ...(a.sourceText !== undefined ? { sourceText: a.sourceText } : {}),
+    ...(a.scriptExports?.length ? { scriptExports: [...a.scriptExports] } : {}),
   }))
   return { nodes, assets, assetFolders }
 }
@@ -139,6 +164,18 @@ export type SceneNodePlacementOptions = {
   parentId?: string
   worldPosition?: Vec3
 }
+
+/** Viewport transform tool (Sketcher `toolbar2` tools row). */
+export type ViewportToolMode = 'select' | 'translate' | 'rotate' | 'scale'
+
+/** Backend `watch` payloads for `channel: assets_disk` (debounced disk → ``project.json`` sync). */
+type AssetsDiskWsPayload = {
+  hello?: boolean
+  events?: { type: string; assetId?: string; relativePath?: string }[]
+  error?: string
+}
+
+export type AssetsDiskWatchStatus = 'idle' | 'connecting' | 'open' | 'error'
 
 export type EditorContextValue = {
   projectId: string
@@ -152,6 +189,10 @@ export type EditorContextValue = {
   panelFocus: PanelFocus
   loadError: string | null
   isSaving: boolean
+  /** Bumped after server sync to refresh resolved asset URLs. */
+  assetFetchRev: number
+
+  assetsDiskWatch: AssetsDiskWatchStatus
 
   hierarchySearch: string
   hierarchyCollapsed: Record<string, true>
@@ -174,8 +215,25 @@ export type EditorContextValue = {
   updateNode: (
     id: string,
     patch: Partial<
-      Pick<EditorNode, 'position' | 'rotation' | 'scale' | 'name' | 'visible' | 'layerId' | 'assetRef'>
+      Pick<
+        EditorNode,
+        | 'position'
+        | 'rotation'
+        | 'scale'
+        | 'name'
+        | 'visible'
+        | 'layerId'
+        | 'assetRef'
+      >
     >,
+  ) => void
+
+  addInteractionAttachment: (nodeId: string, scriptAssetId: string) => void
+  removeInteractionAttachment: (nodeId: string, attachmentId: string) => void
+  updateInteractionAttachment: (
+    nodeId: string,
+    attachmentId: string,
+    patch: Partial<Pick<InteractionScriptAttachment, 'scriptAssetRef' | 'serializedProps'>>,
   ) => void
 
   toggleNodeHierarchyVisible: (id: string) => void
@@ -196,13 +254,34 @@ export type EditorContextValue = {
 
   addGltfNodeLocal: (name: string, gltfDataUrl: string, parentId?: string) => string
   addGltfFromFile: (file: File) => Promise<void>
+  addInteractionScriptAsset: (
+    kind: InteractionTemplateKind,
+    opts?: { logicalFolder?: string; baseName?: string },
+  ) => Promise<string>
   addSceneNodeFromAsset: (assetId: string, opts?: SceneNodePlacementOptions) => void
-  updateProjectAsset: (assetId: string, patch: Partial<Pick<ProjectAssetEntry, 'name' | 'logicalFolder'>>) => void
+  updateProjectAsset: (
+    assetId: string,
+    patch: Partial<
+      Pick<
+        ProjectAssetEntry,
+        | 'name'
+        | 'logicalFolder'
+        | 'assetKind'
+        | 'scriptRole'
+        | 'interactionKind'
+        | 'scriptExports'
+        | 'sourceText'
+        | 'relativePath'
+      >
+    >,
+  ) => void
   moveAssetLogicalFolder: (assetId: string, folderSegments: string[]) => void
   /** Declared empty folders for catalog parity (serialized). */
   addExplicitAssetFolder: (folderPathSegments: string[]) => void
   removeExplicitAssetFolder: (folderPathNormalized: string) => void
   deleteProjectAssetsConfirm: (assetIds: string[]) => void
+  /** Update script source without affecting undo history (typing in Monaco). */
+  setProjectAssetSourceText: (assetId: string, text: string) => void
   replaceProjectState: (
     nodes: EditorNode[],
     assets: ProjectAssetEntry[],
@@ -218,6 +297,17 @@ export type EditorContextValue = {
   markSavedBaseline: () => void
   newProject: () => void
   resolveGltfUrl: (node: EditorNode) => string | null
+
+  viewportToolMode: ViewportToolMode
+  setViewportToolMode: (m: ViewportToolMode) => void
+  /** Gizmo drag begin/end from the preview canvas (one undo step per drag). */
+  setViewportTransformDragging: (dragging: boolean) => void
+  undoDepth: number
+  redoDepth: number
+  canUndoVisual: boolean
+  canRedoVisual: boolean
+  undo: () => void
+  redo: () => void
 }
 
 const EditorContext = createContext<EditorContextValue | null>(null)
@@ -229,11 +319,39 @@ export function useEditor(): EditorContextValue {
 }
 
 function cloneNodes(nodes: EditorNode[]): EditorNode[] {
-  return nodes.map((n) => ({ ...n }))
+  return nodes.map((n) => ({
+    ...n,
+    ...(n.interactionAttachments?.length
+      ? {
+          interactionAttachments: n.interactionAttachments.map((a) => ({
+            ...a,
+            ...(a.serializedProps ? { serializedProps: { ...a.serializedProps } } : {}),
+          })),
+        }
+      : {}),
+  }))
 }
 
 function cloneAssets(a: ProjectAssetEntry[]): ProjectAssetEntry[] {
   return a.map((x) => ({ ...x }))
+}
+
+type HistorySnap = {
+  nodes: EditorNode[]
+  projectAssets: ProjectAssetEntry[]
+  assetFoldersExplicit: string[]
+}
+
+function takeDocSnapshot(
+  nodes: EditorNode[],
+  assets: ProjectAssetEntry[],
+  folders: string[],
+): HistorySnap {
+  return {
+    nodes: cloneNodes(nodes),
+    projectAssets: cloneAssets(assets),
+    assetFoldersExplicit: [...folders],
+  }
 }
 
 export function EditorProvider({
@@ -253,6 +371,7 @@ export function EditorProvider({
   const [loadError, setLoadError] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
   const [assetFetchRev, setAssetFetchRev] = useState(0)
+  const [assetsDiskWatch, setAssetsDiskWatch] = useState<AssetsDiskWatchStatus>('idle')
 
   const [hierarchySearch, setHierarchySearchState] = useState('')
   const [hierarchyCollapsed, setHierarchyCollapsed] = useState<Record<string, true>>({})
@@ -261,11 +380,116 @@ export function EditorProvider({
   const [assetExplorerPath, setAssetExplorerPathState] = useState<string[]>([])
   const [assetFoldersExplicit, setAssetFoldersExplicit] = useState<string[]>([])
 
+  const [viewportToolMode, setViewportToolModeState] = useState<ViewportToolMode>('translate')
+  const [histCounts, setHistCounts] = useState({ undo: 0, redo: 0 })
+
   const baselineRef = useRef<string>(baselineKey(defaultNodes(), [], []))
   const projectIdRef = useRef(projectId)
   projectIdRef.current = projectId
   /** Bump when server/local truth changes so a late GET /document must not overwrite newer state */
   const hydrateEpochRef = useRef(0)
+
+  const undoStackRef = useRef<HistorySnap[]>([])
+  const redoStackRef = useRef<HistorySnap[]>([])
+  const historyApplyingRef = useRef(false)
+  const viewportTransformDraggingRef = useRef(false)
+
+  const nodesDocRef = useRef(nodes)
+  const projectAssetsDocRef = useRef(projectAssets)
+  const assetFoldersDocRef = useRef(assetFoldersExplicit)
+  nodesDocRef.current = nodes
+  projectAssetsDocRef.current = projectAssets
+  assetFoldersDocRef.current = assetFoldersExplicit
+
+  const syncHistoryCounts = useCallback(() => {
+    setHistCounts({
+      undo: undoStackRef.current.length,
+      redo: redoStackRef.current.length,
+    })
+  }, [])
+
+  const clearHistoryStacks = useCallback(() => {
+    undoStackRef.current = []
+    redoStackRef.current = []
+    setHistCounts({ undo: 0, redo: 0 })
+  }, [])
+
+  const pushUndo = useCallback(() => {
+    if (historyApplyingRef.current) return
+    undoStackRef.current.push(
+      takeDocSnapshot(nodesDocRef.current, projectAssetsDocRef.current, assetFoldersDocRef.current),
+    )
+    redoStackRef.current = []
+    if (undoStackRef.current.length > 100) undoStackRef.current.shift()
+    syncHistoryCounts()
+  }, [syncHistoryCounts])
+
+  const undo = useCallback(() => {
+    if (historyApplyingRef.current) return
+    if (undoStackRef.current.length === 0) return
+    historyApplyingRef.current = true
+    try {
+      const prev = undoStackRef.current.pop()!
+      redoStackRef.current.push(
+        takeDocSnapshot(nodesDocRef.current, projectAssetsDocRef.current, assetFoldersDocRef.current),
+      )
+      setNodes(cloneNodes(prev.nodes))
+      setProjectAssets(cloneAssets(prev.projectAssets))
+      setAssetFoldersExplicit([...prev.assetFoldersExplicit])
+      setSelectedNodeIdsState((cur) => {
+        const valid = cur.filter((id) => prev.nodes.some((n) => n.id === id))
+        if (valid.length) return valid
+        const rootId = prev.nodes.find((n) => n.parentId === null)?.id
+        return rootId ? [rootId] : []
+      })
+      setDirty(true)
+    } finally {
+      historyApplyingRef.current = false
+      syncHistoryCounts()
+    }
+  }, [syncHistoryCounts])
+
+  const redo = useCallback(() => {
+    if (historyApplyingRef.current) return
+    if (redoStackRef.current.length === 0) return
+    historyApplyingRef.current = true
+    try {
+      const next = redoStackRef.current.pop()!
+      undoStackRef.current.push(
+        takeDocSnapshot(nodesDocRef.current, projectAssetsDocRef.current, assetFoldersDocRef.current),
+      )
+      setNodes(cloneNodes(next.nodes))
+      setProjectAssets(cloneAssets(next.projectAssets))
+      setAssetFoldersExplicit([...next.assetFoldersExplicit])
+      setSelectedNodeIdsState((cur) => {
+        const valid = cur.filter((id) => next.nodes.some((n) => n.id === id))
+        if (valid.length) return valid
+        const rootId = next.nodes.find((n) => n.parentId === null)?.id
+        return rootId ? [rootId] : []
+      })
+      setDirty(true)
+    } finally {
+      historyApplyingRef.current = false
+      syncHistoryCounts()
+    }
+  }, [syncHistoryCounts])
+
+  const setViewportTransformDragging = useCallback(
+    (dragging: boolean) => {
+      if (dragging) {
+        if (!viewportTransformDraggingRef.current) pushUndo()
+        viewportTransformDraggingRef.current = true
+      } else {
+        viewportTransformDraggingRef.current = false
+      }
+    },
+    [pushUndo],
+  )
+
+  const setViewportToolMode = useCallback((m: ViewportToolMode) => {
+    viewportTransformDraggingRef.current = false
+    setViewportToolModeState(m)
+  }, [])
 
   const selectionId =
     selectedNodeIds.length === 0 ? null : selectedNodeIds[selectedNodeIds.length - 1]!
@@ -314,7 +538,7 @@ export function EditorProvider({
           'Cannot save to server: some models use local inline glTF only. Re-import via Import glTF… with the API running.',
         )
       const pid = projectIdRef.current
-      const doc = toProjectFileV2(snapNodes, snapAssets, snapFolders)
+      const doc = toProjectFileV2(snapNodes, stripEphemeralScriptSources(snapAssets), snapFolders)
       const normalized = await putDocument(pid, doc)
       const { nodes: nn, assets: na, assetFolders: nf } = docToEditorState(normalized)
       setNodes(nn)
@@ -329,6 +553,8 @@ export function EditorProvider({
   )
 
   useEffect(() => {
+    clearHistoryStacks()
+    setViewportToolMode('translate')
     setLoadError(null)
     setNodes(defaultNodes())
     setProjectAssets([])
@@ -370,23 +596,182 @@ export function EditorProvider({
     return () => {
       cancelled = true
     }
-  }, [projectId])
+  }, [projectId, clearHistoryStacks, setViewportToolMode])
+
+  useEffect(() => {
+    if (!isApiConfigured()) {
+      setAssetsDiskWatch('idle')
+      return
+    }
+
+    let cancelled = false
+    let ws: WebSocket | null = null
+    let retryTimer: ReturnType<typeof setTimeout> | undefined
+    let attempt = 0
+
+    const refreshFromServer = async () => {
+      hydrateEpochRef.current += 1
+      const gen = hydrateEpochRef.current
+      try {
+        const doc = await fetchDocument(projectIdRef.current)
+        if (cancelled || gen !== hydrateEpochRef.current) return
+        if (doc && doc.version === 2) {
+          const { nodes: nn, assets: na, assetFolders: nf } = docToEditorState(doc)
+          setNodes(nn)
+          setProjectAssets(na)
+          setAssetFoldersExplicit(nf)
+          baselineRef.current = baselineKey(nn, na, nf)
+          setDirty(false)
+          clearHistoryStacks()
+          setAssetFetchRev((r) => r + 1)
+        }
+      } catch {
+        /* transient */
+      }
+    }
+
+    const scheduleReconnect = () => {
+      if (cancelled) return
+      attempt += 1
+      const ms = Math.min(15_000, 1000 * Math.min(64, Math.pow(2, Math.min(attempt, 6))))
+      retryTimer = globalThis.setTimeout(connect, ms)
+    }
+
+    const connect = () => {
+      if (cancelled) return
+      const url = assetsWatchUrl(projectIdRef.current)
+      if (!url) {
+        setAssetsDiskWatch('idle')
+        return
+      }
+      setAssetsDiskWatch('connecting')
+      ws = new WebSocket(url)
+
+      ws.onopen = () => {
+        attempt = 0
+        setAssetsDiskWatch('open')
+      }
+      ws.onerror = () => {
+        setAssetsDiskWatch((s) => (s === 'connecting' ? 'error' : s))
+      }
+      ws.onclose = () => {
+        if (cancelled) return
+        setAssetsDiskWatch((s) => (s === 'open' ? 'error' : 'connecting'))
+        scheduleReconnect()
+      }
+      ws.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(String(ev.data)) as { channel?: string; payload?: AssetsDiskWsPayload }
+          if (msg.channel !== 'assets_disk' || !msg.payload) return
+          if (msg.payload.error) {
+            setAssetsDiskWatch('error')
+            return
+          }
+          if (msg.payload.hello) {
+            const evs = msg.payload.events
+            if (!Array.isArray(evs) || evs.length === 0) return
+            void refreshFromServer()
+            return
+          }
+          void refreshFromServer()
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+
+    connect()
+
+    return () => {
+      cancelled = true
+      if (retryTimer) clearTimeout(retryTimer)
+      if (ws && ws.readyState === WebSocket.OPEN) ws.close()
+      setAssetsDiskWatch('idle')
+    }
+  }, [projectId, clearHistoryStacks])
 
   const updateNode = useCallback(
     (
       id: string,
       patch: Partial<
-        Pick<EditorNode, 'position' | 'rotation' | 'scale' | 'name' | 'visible' | 'layerId' | 'assetRef'>
+        Pick<
+          EditorNode,
+          | 'position'
+          | 'rotation'
+          | 'scale'
+          | 'name'
+          | 'visible'
+          | 'layerId'
+          | 'assetRef'
+        >
       >,
     ) => {
+      if (!historyApplyingRef.current && !viewportTransformDraggingRef.current) {
+        pushUndo()
+      }
       setNodes((prev) => prev.map((n) => (n.id === id ? { ...n, ...patch } : n)))
       setDirty(true)
     },
-    [],
+    [pushUndo],
+  )
+
+  const addInteractionAttachment = useCallback(
+    (nodeId: string, scriptAssetId: string) => {
+      pushUndo()
+      const att: InteractionScriptAttachment = { id: newAttachmentId(), scriptAssetRef: scriptAssetId }
+      setNodes((prev) =>
+        prev.map((n) => {
+          if (n.id !== nodeId) return n
+          const list = [...(n.interactionAttachments ?? []), att]
+          return { ...n, interactionAttachments: list }
+        }),
+      )
+      setDirty(true)
+    },
+    [pushUndo],
+  )
+
+  const removeInteractionAttachment = useCallback(
+    (nodeId: string, attachmentId: string) => {
+      pushUndo()
+      setNodes((prev) =>
+        prev.map((n) => {
+          if (n.id !== nodeId) return n
+          const list = (n.interactionAttachments ?? []).filter((a) => a.id !== attachmentId)
+          return { ...n, interactionAttachments: list.length ? list : undefined }
+        }),
+      )
+      setDirty(true)
+    },
+    [pushUndo],
+  )
+
+  const updateInteractionAttachment = useCallback(
+    (
+      nodeId: string,
+      attachmentId: string,
+      patch: Partial<
+        Pick<InteractionScriptAttachment, 'scriptAssetRef' | 'serializedProps'>
+      >,
+    ) => {
+      pushUndo()
+      setNodes((prev) =>
+        prev.map((n) => {
+          if (n.id !== nodeId) return n
+          const list = (n.interactionAttachments ?? []).map((a) =>
+            a.id === attachmentId ? { ...a, ...patch } : a,
+          )
+          return { ...n, interactionAttachments: list.length ? list : undefined }
+        }),
+      )
+      setDirty(true)
+    },
+    [pushUndo],
   )
 
   const toggleNodeHierarchyVisible = useCallback((id: string) => {
     if (id === 'root') return
+    pushUndo()
     setNodes((prev) =>
       prev.map((n) => {
         if (n.id !== id) return n
@@ -395,14 +780,15 @@ export function EditorProvider({
       }),
     )
     setDirty(true)
-  }, [])
+  }, [pushUndo])
 
   const placeSceneNodeInHierarchy = useCallback(
     (nodeId: string, parentId: string, insertBeforeSiblingId: string | null) => {
+      pushUndo()
       setNodes((prev) => relocateSceneNodeAmongSiblings(prev, nodeId, parentId, insertBeforeSiblingId) ?? prev)
       setDirty(true)
     },
-    [],
+    [pushUndo],
   )
 
   const reparentSceneNode = useCallback(
@@ -413,6 +799,7 @@ export function EditorProvider({
   )
 
   const createEmptyChild = useCallback((parentId: string) => {
+    pushUndo()
     const id = uid()
     const node: EditorNode = {
       id,
@@ -430,12 +817,13 @@ export function EditorProvider({
       return next
     })
     setDirty(true)
-  }, [])
+  }, [pushUndo])
 
   const duplicateSceneNode = useCallback((nodeId: string) => {
     if (nodeId === 'root') return
     const src = nodes.find((n) => n.id === nodeId)
     if (!src) return
+    pushUndo()
     const nid = uid()
     const dup: EditorNode = {
       id: nid,
@@ -448,11 +836,20 @@ export function EditorProvider({
       ...(src.layerId ? { layerId: src.layerId } : {}),
       ...(src.assetRef ? { assetRef: src.assetRef } : {}),
       ...(src.gltfDataUrl ? { gltfDataUrl: src.gltfDataUrl } : {}),
+      ...(src.interactionAttachments?.length
+        ? {
+            interactionAttachments: src.interactionAttachments.map((a) => ({
+              ...a,
+              id: newAttachmentId(),
+              ...(a.serializedProps ? { serializedProps: { ...a.serializedProps } } : {}),
+            })),
+          }
+        : {}),
     }
     setNodes((prev) => [...prev, dup])
     setSelectedNodeIdsState([nid])
     setDirty(true)
-  }, [nodes])
+  }, [nodes, pushUndo])
 
   const deleteSceneSubtreesConfirm = useCallback((rootIds: string[]) => {
     const uniq = [...new Set(rootIds)].filter((id) => id !== 'root')
@@ -464,6 +861,7 @@ export function EditorProvider({
       )
     )
       return
+    pushUndo()
     const remove = new Set<string>()
     for (const rid of minimized) {
       const stack = [rid]
@@ -483,7 +881,7 @@ export function EditorProvider({
       return rootId ? [rootId] : []
     })
     setDirty(true)
-  }, [nodes])
+  }, [nodes, pushUndo])
 
   const selectChildrenOf = useCallback(
     (parentId: string) => {
@@ -496,7 +894,15 @@ export function EditorProvider({
 
   const detachAssetRefsForDeletedAssets = useCallback((assetIds: Set<string>) => {
     setNodes((prev) =>
-      prev.map((n) => (n.assetRef && assetIds.has(n.assetRef) ? { ...n, assetRef: undefined } : n)),
+      prev.map((n) => {
+        let next: EditorNode = n
+        if (n.assetRef && assetIds.has(n.assetRef)) next = { ...next, assetRef: undefined }
+        const atts = n.interactionAttachments?.filter((a) => !assetIds.has(a.scriptAssetRef))
+        if (atts && atts.length !== (n.interactionAttachments?.length ?? 0)) {
+          next = { ...next, interactionAttachments: atts.length ? atts : undefined }
+        }
+        return next
+      }),
     )
     setDirty(true)
   }, [])
@@ -527,14 +933,23 @@ export function EditorProvider({
 
   const addGltfFromFile = useCallback(
     async (file: File) => {
+      pushUndo()
       const pid = projectIdRef.current
       const folderLogical = normalizeFolderSegments(assetExplorerPath)
+      const lower = (file.name || '').toLowerCase()
+      const isScript =
+        lower.endsWith('.js') || lower.endsWith('.mjs') || lower.endsWith('.cjs')
+
       if (isApiConfigured()) {
         const up = await uploadAssetStage(pid, file)
+        const pathKind = inferAssetKindFromPath(up.relativePath)
         const entry: ProjectAssetEntry = {
           assetId: up.assetId,
           relativePath: up.relativePath,
           name: file.name,
+          ...(pathKind === 'script'
+            ? { assetKind: 'script' as const, scriptRole: 'interaction' as const }
+            : { assetKind: 'gltf' as const }),
           ...(folderLogical ? { logicalFolder: folderLogical } : {}),
         }
         const nextAssets = projectAssets.some((p) => p.assetId === entry.assetId)
@@ -554,10 +969,30 @@ export function EditorProvider({
         }
         return
       }
+
+      if (isScript) {
+        const text = await readFileAsText(file)
+        const id = uid()
+        const ext = lower.endsWith('.mjs') ? '.mjs' : lower.endsWith('.cjs') ? '.cjs' : '.js'
+        const entry: ProjectAssetEntry = {
+          assetId: id,
+          relativePath: `_virtual/${id}${ext}`,
+          name: file.name,
+          assetKind: 'script',
+          scriptRole: 'interaction',
+          sourceText: text,
+          ...(folderLogical ? { logicalFolder: folderLogical } : {}),
+        }
+        setProjectAssets((prev) => [...prev, entry])
+        setDirty(true)
+        return
+      }
+
       const dataUrl = await readFileAsDataUrl(file)
       addGltfNodeLocal(file.name || 'model', dataUrl)
     },
     [
+      pushUndo,
       assetExplorerPath,
       addGltfNodeLocal,
       nodes,
@@ -567,12 +1002,74 @@ export function EditorProvider({
     ],
   )
 
+  const addInteractionScriptAsset = useCallback(
+    async (kind: InteractionTemplateKind, opts?: { logicalFolder?: string; baseName?: string }) => {
+      pushUndo()
+      const pid = projectIdRef.current
+      const folderLogical =
+        opts?.logicalFolder !== undefined
+          ? normalizeLogicalFolder(opts.logicalFolder)
+          : normalizeFolderSegments(assetExplorerPath)
+      const built = buildInteractionScriptTemplate(kind, { baseName: opts?.baseName })
+
+      if (isApiConfigured()) {
+        const blob = new Blob([built.source], { type: 'text/javascript' })
+        const file = new File([blob], built.fileName, { type: 'text/javascript' })
+        const up = await uploadAssetStage(pid, file)
+        const entry: ProjectAssetEntry = {
+          assetId: up.assetId,
+          relativePath: up.relativePath,
+          name: built.fileName,
+          assetKind: 'script',
+          scriptRole: 'interaction',
+          interactionKind: kind,
+          scriptExports: [built.className],
+          ...(folderLogical ? { logicalFolder: folderLogical } : {}),
+        }
+        const nextAssets = projectAssets.some((p) => p.assetId === entry.assetId)
+          ? projectAssets
+          : [...projectAssets, entry]
+
+        setProjectAssets(nextAssets)
+
+        setIsSaving(true)
+        try {
+          await persistSnapshotToServer(nodes, nextAssets, assetFoldersExplicit)
+        } catch (e) {
+          setDirty(true)
+          throw e
+        } finally {
+          setIsSaving(false)
+        }
+        return entry.assetId
+      }
+
+      const id = uid()
+      const entry: ProjectAssetEntry = {
+        assetId: id,
+        relativePath: `_virtual/${id}.js`,
+        name: built.fileName,
+        assetKind: 'script',
+        scriptRole: 'interaction',
+        interactionKind: kind,
+        sourceText: built.source,
+        scriptExports: [built.className],
+        ...(folderLogical ? { logicalFolder: folderLogical } : {}),
+      }
+      setProjectAssets((prev) => [...prev, entry])
+      setDirty(true)
+      return entry.assetId
+    },
+    [pushUndo, assetExplorerPath, projectAssets, nodes, persistSnapshotToServer, assetFoldersExplicit],
+  )
+
   /** Note: avoids stale explorer path in closures by passing latest via ref-less closure each render */
 
   const addSceneNodeFromAsset = useCallback(
     (assetId: string, opts?: SceneNodePlacementOptions) => {
       const entry = projectAssets.find((a) => a.assetId === assetId)
-      if (!entry) return
+      if (!entry || !isGltfAssetEntry(entry)) return
+      pushUndo()
       const rootRef = nodes.find((n) => n.parentId === null)?.id ?? 'root'
       const parentId = opts?.parentId ?? rootRef
 
@@ -602,11 +1099,27 @@ export function EditorProvider({
       })
       setDirty(true)
     },
-    [projectAssets, nodes],
+    [projectAssets, nodes, pushUndo],
   )
 
   const updateProjectAsset = useCallback(
-    (assetId: string, patch: Partial<Pick<ProjectAssetEntry, 'name' | 'logicalFolder'>>) => {
+    (
+      assetId: string,
+      patch: Partial<
+        Pick<
+          ProjectAssetEntry,
+          | 'name'
+          | 'logicalFolder'
+          | 'assetKind'
+          | 'scriptRole'
+          | 'interactionKind'
+          | 'scriptExports'
+          | 'sourceText'
+          | 'relativePath'
+        >
+      >,
+    ) => {
+      pushUndo()
       const norm =
         patch.logicalFolder !== undefined
           ? { ...patch, logicalFolder: normalizeLogicalFolder(patch.logicalFolder) || undefined }
@@ -616,7 +1129,7 @@ export function EditorProvider({
       )
       setDirty(true)
     },
-    [],
+    [pushUndo],
   )
 
   const moveAssetLogicalFolder = useCallback((assetId: string, folderSegments: string[]) => {
@@ -628,16 +1141,25 @@ export function EditorProvider({
     (folderPathSegments: string[]) => {
       const p = normalizeFolderSegments(folderPathSegments)
       if (!p) return
+      pushUndo()
       setAssetFoldersExplicit((prev) => [...new Set([...prev, p])].sort())
       setDirty(true)
     },
-    [],
+    [pushUndo],
   )
 
   const removeExplicitAssetFolder = useCallback((folderPathNormalized: string) => {
     const p = normalizeLogicalFolder(folderPathNormalized)
     if (!p) return
+    pushUndo()
     setAssetFoldersExplicit((prev) => prev.filter((x) => x !== p))
+    setDirty(true)
+  }, [pushUndo])
+
+  const setProjectAssetSourceText = useCallback((assetId: string, text: string) => {
+    setProjectAssets((prev) =>
+      prev.map((a) => (a.assetId === assetId ? { ...a, sourceText: text } : a)),
+    )
     setDirty(true)
   }, [])
 
@@ -660,12 +1182,13 @@ export function EditorProvider({
       )
         return
 
+      pushUndo()
       const removeSet = new Set(uniq)
       detachAssetRefsForDeletedAssets(removeSet)
       setProjectAssets((prev) => prev.filter((a) => !removeSet.has(a.assetId)))
       setDirty(true)
     },
-    [nodes, projectAssets, detachAssetRefsForDeletedAssets],
+    [nodes, detachAssetRefsForDeletedAssets, pushUndo],
   )
 
   const setExplorerPathSegments = useCallback((segments: string[]) => {
@@ -684,6 +1207,7 @@ export function EditorProvider({
         markClean?: boolean
       },
     ) => {
+      if (!historyApplyingRef.current) clearHistoryStacks()
       setNodes(cloneNodes(nextNodes))
       setProjectAssets(cloneAssets(nextAssets))
 
@@ -711,7 +1235,7 @@ export function EditorProvider({
         setDirty(true)
       }
     },
-    [assetFoldersExplicit],
+    [assetFoldersExplicit, clearHistoryStacks],
   )
 
   const markSavedBaseline = useCallback(() => {
@@ -730,6 +1254,7 @@ export function EditorProvider({
 
   const newProject = useCallback(() => {
     hydrateEpochRef.current += 1
+    clearHistoryStacks()
     const fresh = defaultNodes()
     baselineRef.current = baselineKey(fresh, [], [])
     setNodes(fresh)
@@ -741,7 +1266,7 @@ export function EditorProvider({
     setAssetExplorerPathState([])
     setAssetFoldersExplicit([])
     setDirty(false)
-  }, [])
+  }, [clearHistoryStacks])
 
   const resolveGltfUrl = useCallback(
     (node: EditorNode): string | null => {
@@ -773,6 +1298,8 @@ export function EditorProvider({
       panelFocus,
       loadError,
       isSaving,
+      assetFetchRev,
+      assetsDiskWatch,
 
       hierarchySearch,
       hierarchyCollapsed,
@@ -793,6 +1320,9 @@ export function EditorProvider({
       setAssetExplorerPath: setExplorerPathSegments,
 
       updateNode,
+      addInteractionAttachment,
+      removeInteractionAttachment,
+      updateInteractionAttachment,
       toggleNodeHierarchyVisible,
       reparentSceneNode,
       placeSceneNodeInHierarchy,
@@ -803,6 +1333,7 @@ export function EditorProvider({
 
       addGltfNodeLocal,
       addGltfFromFile,
+      addInteractionScriptAsset,
       addSceneNodeFromAsset,
       updateProjectAsset,
       moveAssetLogicalFolder,
@@ -810,11 +1341,22 @@ export function EditorProvider({
       removeExplicitAssetFolder,
       deleteProjectAssetsConfirm,
 
+      setProjectAssetSourceText,
       replaceProjectState,
       saveProjectToServer,
       markSavedBaseline,
       newProject,
       resolveGltfUrl,
+
+      viewportToolMode,
+      setViewportToolMode,
+      setViewportTransformDragging,
+      undoDepth: histCounts.undo,
+      redoDepth: histCounts.redo,
+      canUndoVisual: histCounts.undo > 0,
+      canRedoVisual: histCounts.redo > 0,
+      undo,
+      redo,
     }),
     [
       projectId,
@@ -827,6 +1369,8 @@ export function EditorProvider({
       panelFocus,
       loadError,
       isSaving,
+      assetFetchRev,
+      assetsDiskWatch,
       hierarchySearch,
       hierarchyCollapsed,
       isolateSubtreeId,
@@ -839,6 +1383,9 @@ export function EditorProvider({
       clearIsolate,
       setExplorerPathSegments,
       updateNode,
+      addInteractionAttachment,
+      removeInteractionAttachment,
+      updateInteractionAttachment,
       toggleNodeHierarchyVisible,
       reparentSceneNode,
       placeSceneNodeInHierarchy,
@@ -848,18 +1395,26 @@ export function EditorProvider({
       selectChildrenOf,
       addGltfNodeLocal,
       addGltfFromFile,
+      addInteractionScriptAsset,
       addSceneNodeFromAsset,
       updateProjectAsset,
       moveAssetLogicalFolder,
       addExplicitAssetFolder,
       removeExplicitAssetFolder,
       deleteProjectAssetsConfirm,
+      setProjectAssetSourceText,
       replaceProjectState,
       saveProjectToServer,
       markSavedBaseline,
       newProject,
       resolveGltfUrl,
       setHierarchySearch,
+      viewportToolMode,
+      histCounts,
+      undo,
+      redo,
+      setViewportToolMode,
+      setViewportTransformDragging,
     ],
   )
 

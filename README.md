@@ -9,9 +9,10 @@ Portable format definitions (**`proposals/`**, **`specifications/`**) live in th
 | Directory | Role |
 |-----------|------|
 | [`igltf-engine/`](igltf-engine/) | Browser runtime: load interactive glTF, execute scripted behaviors, host API for scripts. **Not in scope for iteration 1** — see [`ROADMAP.md`](ROADMAP.md). |
-| [`igltf-editor-frontend/`](igltf-editor-frontend/) | React app: **Editor** (`/editor/:id`) and **Play** (`/play/:id`). Iteration 1: UI + editor preview; play loads assets from the backend manifest (full **`igltf-engine`** integration later). |
+| [`igltf-editor-frontend/`](igltf-editor-frontend/) | React app: **Projects hub** (`/`), **Editor** (`/editor/:id`), **Play** (`/play/:id`). See [`README`](igltf-editor-frontend/README.md). |
 | [`igltf-editor-backend/`](igltf-editor-backend/) | FastAPI: save scenes, serve static files under `/files/...`, **`GET /play/:id`** returns JSON with absolute asset URLs. |
 | [`igltf-editor-core/`](igltf-editor-core/) | Python library for shared glTF/extension logic. **Iteration 1:** defer; move code out of the backend **at end of POC** (see [`igltf-editor-core/README.md`](igltf-editor-core/README.md)). |
+| [`tauri-build/`](tauri-build/) | Windows-focused **desktop packaging**: PyInstaller freeze + **`tauri build`** (NSIS `setup.exe`), version bump scripts. See [`tauri-build/README.md`](tauri-build/README.md). |
 
 ## Proof of concept — iteration 1
 
@@ -19,9 +20,9 @@ Portable format definitions (**`proposals/`**, **`specifications/`**) live in th
 
 - **`igltf-editor-frontend`** + **`igltf-editor-backend`** wired together.
 - **No authentication.**
-- **Single id** `test`: use `/editor/test` and `/play/test`.
-- **On-disk layout** (under a configurable root): `test/test.glb` and `test/test.js`, exposed as **`/files/test/test.glb`** and **`/files/test/test.js`**. The **`.glb`** should reference the script with a **relative** URI **`./test.js`** (same directory when resolved against the glb URL).
-- **`GET /play/test`**: returns **JSON** including the **absolute** URL of the glb (e.g. `{ "glbUrl": "https://api.example.com/files/test/test.glb" }`). The client resolves `./test.js` from that base or the backend also returns `jsUrl` if convenient for the quick & dirty contract.
+- **`projects.json` hub** + studio API on the backend: workspaces can live **anywhere on disk**; **`STORAGE_ROOT` / `IGLTF_APP_DATA_DIR`** keeps the registry (**`projects.json`**) and optional slug-only workspaces (e.g. `data/test`).
+- **Play build output:** **`build/scene.glb`** (legacy **`test.glb`** still supported). Optional JS alongside glb (**`build/play.js`**, root **`test.js`**, …).
+- **`GET /play/{id}`** returns absolute **`glbUrl`** / **`jsUrl`** URLs as before.
 - **CORS** for the frontend dev server (e.g. `http://localhost:5173`) and production origin behind a reverse proxy.
 - **Authoring persistence (near-term):** `project.json` + asset files per project id on the backend; **no** merged shipping `glb` in that phase. See [`docs/project-json-phase-plan.md`](docs/project-json-phase-plan.md).
 

@@ -1,4 +1,20 @@
+import type { InteractionTemplateKind } from '@/scriptRuntime/interactionScriptTemplates'
+
 export type Vec3 = [number, number, number]
+
+/** Instance props merged into the interaction class before `onLoaded` / handler (JSON-serializable). */
+export type InteractionSerializedPropsMap = Record<string, string | number | boolean | null>
+
+/** One script anchored to a scene node; runtime `targetId` is that node's id (not stored). */
+export type InteractionScriptAttachment = {
+  id: string
+  scriptAssetRef: string
+  serializedProps?: InteractionSerializedPropsMap
+}
+
+export type ProjectAssetKind = 'gltf' | 'script'
+
+export type ScriptRole = 'interaction' | 'behaviour'
 
 /** Persisted scene node (v2); no inline glTF on disk. */
 export type SceneNodeV2 = {
@@ -13,6 +29,8 @@ export type SceneNodeV2 = {
   visible?: boolean
   /** Scene / layer tagging (minimal v1 parity). */
   layerId?: string
+  /** Scripts / behaviours attached to this node (each with own target + props). */
+  interactionAttachments?: InteractionScriptAttachment[]
 }
 
 export type ProjectAssetEntry = {
@@ -21,9 +39,20 @@ export type ProjectAssetEntry = {
   name?: string
   /** Virtual path under catalog (segments joined by `/`, no leading slash). */
   logicalFolder?: string
+  /** When omitted, inferred from file extension. */
+  assetKind?: ProjectAssetKind
+  /** Editor metadata for scripting; not required for pure glTF. */
+  scriptRole?: ScriptRole
+  /**
+   * Inline script source (offline / before first server sync).
+   * Cleared once the file exists under assets/ on the server.
+   */
+  sourceText?: string
+  /** Editor-only: UMI3D-aligned interaction kind when created from a template (tooling metadata). */
+  interactionKind?: InteractionTemplateKind
+  /** Optional list of global handler names for classic scripts (preview registry). */
+  scriptExports?: string[]
 }
-
-/** In-memory editor node: server `assetRef` and/or local preview `gltfDataUrl`. */
 export type EditorNode = {
   id: string
   name: string
@@ -35,6 +64,7 @@ export type EditorNode = {
   assetRef?: string
   visible?: boolean
   layerId?: string
+  interactionAttachments?: InteractionScriptAttachment[]
 }
 
 export type PanelFocus = 'viewport' | 'hierarchy' | 'assets' | 'inspector'

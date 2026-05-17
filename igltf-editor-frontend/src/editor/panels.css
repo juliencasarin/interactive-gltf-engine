@@ -4,6 +4,13 @@
   min-height: 0;
   overflow: auto;
   padding: 8px;
+  /* Sketcher inspector-field-style.uss–adjacent panel chrome */
+  background: rgb(54, 54, 54);
+}
+
+.inspectorPanel .vecInput {
+  background: rgb(35, 35, 35);
+  border-color: rgb(94, 94, 94);
 }
 
 .inspectorHeaderLabel {
@@ -21,7 +28,7 @@
 }
 
 .inspectorHintMuted {
-  color: rgb(130, 130, 130);
+  color: rgb(142, 142, 142);
   margin-top: 8px;
 }
 
@@ -378,6 +385,52 @@
   color: rgb(255, 155, 120);
 }
 
+.contextMenuItemWithSub {
+  position: relative;
+  padding-right: 28px;
+}
+
+.contextMenuStaticRow {
+  padding: 6px 14px;
+  font-size: 12px;
+  color: rgb(228, 228, 228);
+  cursor: default;
+  user-select: none;
+}
+
+.contextMenuStaticRow:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.contextMenuCaretSub {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  line-height: 1;
+  transform: translateY(-50%);
+  opacity: 0.65;
+  font-size: 10px;
+}
+
+.contextMenuSub {
+  display: none;
+  position: absolute;
+  left: 100%;
+  top: -5px;
+  margin-left: 2px;
+  min-width: 160px;
+  background: rgb(48, 48, 48);
+  border: 1px solid rgb(65, 65, 65);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+  padding: 4px 0;
+  z-index: 230;
+}
+
+.contextMenuItemWithSub:hover .contextMenuSub,
+.contextMenuItemWithSub:focus-within .contextMenuSub {
+  display: block;
+}
+
 .contextMenuBackdrop {
   position: fixed;
   inset: 0;
@@ -445,6 +498,21 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+
+.assetsDiskWatchHint {
+  flex-shrink: 0;
+  margin: 0 10px 4px 34px;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.assetsDiskWatchHint--connecting {
+  color: rgb(180, 180, 180);
+}
+
+.assetsDiskWatchHint--error {
+  color: rgb(255, 178, 100);
 }
 
 /* Same row as Sketcher assetsHeader: path + compact searchInput */
@@ -752,6 +820,18 @@
 .footerToolbarBtn.dangerGhost {
   color: rgb(255, 214, 180);
 }
+
+.footerToolbarSelectSketch {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 2px;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+  background: rgba(255, 255, 255, 0.12);
+  color: rgb(255, 255, 255);
+  cursor: pointer;
+  max-width: 140px;
+}
+
 .inspectorInspectorTop {
   display: flex;
   flex-direction: row;
@@ -818,4 +898,228 @@
 
 .inspectorAssetDropSlot:hover {
   background: rgba(255, 170, 42, 0.06);
+}
+
+.inspectorDropZoneRoot {
+  min-height: 40px;
+}
+
+.inspectorScriptDropHint {
+  border-color: rgba(255, 170, 42, 0.28);
+  background: rgba(35, 35, 35, 0.35);
+}
+
+/* Collapsible “component” row (Sketcher modifier list parity) */
+.inspectorComponentFoldout {
+  margin-top: 10px;
+  border: 1px solid rgb(94, 94, 94);
+  border-radius: 3px;
+  background: rgb(52, 52, 52);
+  overflow: hidden;
+}
+
+.inspectorComponentFoldout > summary {
+  list-style: none;
+}
+
+.inspectorComponentFoldout > summary::-webkit-details-marker {
+  display: none;
+}
+
+.inspectorComponentFoldoutHeader {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  cursor: pointer;
+  user-select: none;
+  background: linear-gradient(180deg, rgb(58, 58, 58) 0%, rgb(52, 52, 52) 100%);
+  border-bottom: 1px solid rgb(94, 94, 94);
+  font-size: 12px;
+  color: rgb(220, 220, 220);
+}
+
+.inspectorComponentFoldout[open] .inspectorComponentFoldoutHeader {
+  border-bottom-color: rgb(94, 94, 94);
+}
+
+.inspectorComponentFoldoutChevron {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: rgb(142, 142, 142);
+  transform: rotate(0deg);
+  transition: transform 0.12s ease;
+  width: 12px;
+  text-align: center;
+}
+
+.inspectorComponentFoldout[open] .inspectorComponentFoldoutChevron {
+  transform: rotate(90deg);
+}
+
+.inspectorComponentFoldoutTitle {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inspectorComponentRemoveBtn {
+  flex-shrink: 0;
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid rgba(255, 140, 100, 0.4);
+  border-radius: 2px;
+  background: rgb(40, 40, 40);
+  color: rgb(255, 170, 130);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.inspectorComponentRemoveBtn:hover {
+  background: rgb(48, 48, 48);
+}
+
+.inspectorComponentBody {
+  padding: 8px 10px 12px;
+  border-left: 2px solid rgba(255, 170, 42, 0.2);
+  margin-left: 0;
+  background: rgb(48, 48, 48);
+}
+
+.inspectorComponentSubTitle {
+  margin-top: 12px;
+  font-size: 0.92em;
+  color: rgb(200, 200, 200);
+}
+
+.scriptAssetEditorToolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.scriptAssetEditorToolbar button {
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgb(52, 52, 52);
+  color: rgb(230, 230, 230);
+  cursor: pointer;
+}
+
+.scriptAssetEditorToolbar button:hover {
+  background: rgb(60, 60, 60);
+}
+
+.scriptAssetEditorDiagSummary {
+  font-size: 11px;
+  color: rgb(160, 200, 140);
+}
+
+.scriptAssetEditorDiagSummary.hasErrors {
+  color: rgb(255, 155, 120);
+}
+
+.scriptAssetEditor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  flex: 1;
+  min-height: 0;
+}
+
+.scriptAssetEditorLabel {
+  font-size: 11px;
+  color: rgb(160, 160, 160);
+  letter-spacing: 0.02em;
+}
+
+.scriptMonacoHost {
+  height: 220px;
+  min-height: 140px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.assetsKindBadge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  vertical-align: middle;
+}
+
+.assetsKindBadgeScript {
+  background: rgba(120, 180, 255, 0.2);
+  color: rgb(170, 210, 255);
+}
+
+.assetsKindBadgeGltf {
+  background: rgba(255, 170, 120, 0.15);
+  color: rgb(255, 200, 170);
+}
+
+.ideOpenWrap {
+  position: relative;
+  z-index: 120;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.idePopover {
+  position: absolute;
+  left: 0;
+  top: 100%;
+  margin-top: 6px;
+  min-width: 260px;
+  max-width: min(380px, calc(100vw - 16px));
+  box-sizing: border-box;
+  padding: 10px;
+  background: rgb(42, 42, 42);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  z-index: 121;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.idePopover label {
+  font-size: 11px;
+  color: rgb(180, 180, 180);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.idePopover input,
+.idePopover select {
+  font-size: 12px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgb(32, 32, 32);
+  color: rgb(230, 230, 230);
+}
+
+.idePopoverActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }

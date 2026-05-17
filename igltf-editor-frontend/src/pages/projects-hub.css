@@ -1,0 +1,229 @@
+.projectsHub {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: #3f3f3f;
+  color: rgb(226, 226, 226);
+  font-family: system-ui, 'Segoe UI', sans-serif;
+  font-size: 13px;
+}
+
+.projectsHubTopbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  background: rgb(61, 61, 61);
+  border-bottom: 1px solid rgb(52, 52, 52);
+}
+
+.projectsHubTitle {
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  font-size: 14px;
+  color: rgb(242, 242, 242);
+}
+
+.projectsHubTopbarBtns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.projectsHubToolbarBtn {
+  padding: 5px 10px;
+  border-radius: 2px;
+  border: 1px solid rgb(65, 65, 65);
+  background: linear-gradient(180deg, rgb(90, 90, 90) 0%, rgb(72, 72, 72) 100%);
+  color: inherit;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.projectsHubToolbarBtn:hover {
+  background: linear-gradient(180deg, rgb(99, 99, 99) 0%, rgb(76, 76, 76) 100%);
+}
+
+.projectsHubToolbarBtn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.projectsHubBanner {
+  margin: 10px 16px 0;
+  padding: 10px;
+  border-radius: 4px;
+  background: rgb(73, 50, 50);
+  color: rgb(255, 220, 220);
+  font-size: 12px;
+}
+
+.projectsHubTableWrap {
+  flex: 1;
+  overflow: auto;
+  padding: 12px 16px 24px;
+}
+
+.projectsHubFooter {
+  font-size: 11px;
+  color: rgb(170, 170, 170);
+  padding: 0 16px 12px;
+}
+
+.projectsHubModalBackdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 15, 15, 0.45);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 56px 16px;
+  z-index: 9999;
+}
+
+.projectsHubModal {
+  width: min(420px, 100%);
+  padding: 16px;
+  background: rgb(55, 55, 55);
+  border-radius: 4px;
+  border: 1px solid rgb(48, 48, 48);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.55);
+}
+
+.projectsHubModal h3 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  color: rgb(245, 245, 245);
+}
+
+.projectsHubField {
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.projectsHubField label {
+  color: rgb(182, 182, 182);
+  font-size: 12px;
+}
+
+.projectsHubRowIn {
+  display: flex;
+  gap: 6px;
+}
+
+.projectsHubModal input[type='text'] {
+  flex: 1;
+  padding: 6px 8px;
+  background: rgb(62, 62, 62);
+  border: 1px solid rgb(48, 48, 48);
+  border-radius: 2px;
+  color: inherit;
+}
+
+.projectsHubMiniBtn {
+  padding: 6px 8px;
+  font-size: 11px;
+  border-radius: 2px;
+  border: 1px solid rgb(65, 65, 65);
+  background: rgb(72, 72, 72);
+  color: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.projectsHubModalFooter {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.projectsHubGhostBtn {
+  background: rgb(62, 62, 62);
+}
+
+.projectsPrimaryBtn {
+  background: linear-gradient(180deg, rgb(90, 148, 90) 0%, rgb(64, 120, 64) 100%);
+  border-color: rgb(50, 100, 50);
+}
+
+.projectsHubHint {
+  font-size: 11px;
+  color: rgb(150, 150, 150);
+  margin-bottom: 8px;
+}
+
+.projectsHubModalNotice {
+  margin: 10px 0 0;
+  padding: 8px;
+  border-radius: 4px;
+  background: rgb(73, 50, 50);
+  color: rgb(255, 220, 220);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.projectsHubTable {
+  width: 100%;
+  border-collapse: collapse;
+  background: rgb(56, 56, 56);
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid rgb(48, 48, 48);
+}
+
+.projectsHubTable th {
+  text-align: left;
+  padding: 8px 10px;
+  background: rgb(61, 61, 61);
+  font-weight: 600;
+  border-bottom: 1px solid rgb(48, 48, 48);
+  white-space: nowrap;
+}
+
+.projectsHubTable td {
+  padding: 8px 10px;
+  vertical-align: top;
+  border-top: 1px solid rgb(48, 48, 48);
+}
+
+.projectsHubName {
+  font-weight: 500;
+  color: rgb(246, 246, 246);
+}
+
+.projectsHubPathCell {
+  color: rgb(174, 174, 174);
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.projectsHubMuted {
+  color: rgb(150, 150, 150);
+  font-size: 12px;
+}
+
+.projectsHubRowActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.projectsHubTinyBtn {
+  padding: 3px 8px;
+  font-size: 11px;
+  border-radius: 2px;
+  border: 1px solid rgb(65, 65, 65);
+  background: linear-gradient(180deg, rgb(90, 90, 90) 0%, rgb(72, 72, 72) 100%);
+  color: inherit;
+  cursor: pointer;
+}
+
+.projectsHubDanger {
+  color: rgb(255, 205, 205);
+  border-color: rgb(120, 60, 60);
+  background: rgb(88, 50, 50);
+}

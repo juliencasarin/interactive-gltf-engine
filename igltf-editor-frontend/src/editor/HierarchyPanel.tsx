@@ -12,28 +12,22 @@ import {
   type RefObject,
 } from 'react'
 import { useEditor } from './EditorContext'
+import {
+  MIME_ASSET,
+  MIME_HIERARCHY_NODE,
+  MIME_HIERARCHY_NODE_ALT,
+  HIERARCHY_NODE_PLAINTEXT_PREFIX,
+  readHierarchyNodeDragId,
+  dragTypeLooksLikeHierarchyNode,
+  dragOverLooksLikeAsset,
+} from './dndTypes'
 import type { EditorNode } from './types'
 import './panels.css'
 
-const MIME_H_NODE = 'application/x-hierarchy-node'
-/** Some browsers expose this in dragover where custom application/* types are hidden. */
-const MIME_H_NODE_ALT = 'text/x-igltf-hierarchy-node'
-const MIME_ASSET = 'application/x-igltf-asset'
-/** Fallback when custom MIME lists are hidden during dragover (common in Firefox/Safari). */
-const MIME_HNODE_PLAINTEXT_PREFIX = 'igltf:hnode:'
-
-function readHierarchyDragId(dt: DataTransfer): string {
-  const a = dt.getData(MIME_H_NODE).trim()
-  if (a) return a
-  const b = dt.getData(MIME_H_NODE_ALT).trim()
-  if (b) return b
-  const p = dt.getData('text/plain').trim()
-  return p.startsWith(MIME_HNODE_PLAINTEXT_PREFIX) ? p.slice(MIME_HNODE_PLAINTEXT_PREFIX.length) : ''
-}
+const readHierarchyDragId = readHierarchyNodeDragId
 
 function hasHierarchyDrag(types: readonly string[]): boolean {
-  const t = [...types]
-  return t.includes(MIME_H_NODE) || t.includes(MIME_H_NODE_ALT)
+  return dragTypeLooksLikeHierarchyNode(types)
 }
 
 /** True if this is probably a hierarchy reorder drag we're allowed to treat as reorder (not external text, etc.). */
@@ -216,7 +210,7 @@ export function HierarchyPanel() {
     const aidMime = e.dataTransfer.getData(MIME_ASSET).trim()
     const aidPlainRaw = e.dataTransfer.getData('text/plain').trim()
     const aidPlain =
-      aidPlainRaw && !aidPlainRaw.startsWith(MIME_HNODE_PLAINTEXT_PREFIX) ? aidPlainRaw : ''
+      aidPlainRaw && !aidPlainRaw.startsWith(HIERARCHY_NODE_PLAINTEXT_PREFIX) ? aidPlainRaw : ''
     const aid = aidMime || aidPlain
 
     e.preventDefault()
@@ -239,7 +233,7 @@ export function HierarchyPanel() {
         hierarchyPanelRootRef.current?.classList.contains('hierarchyPanelRootDragging') ?? false
       const ty = [...e.dataTransfer.types]
       const hi = isReorderDragEvidence(ty, reorderVisual)
-      const as = ty.includes(MIME_ASSET)
+      const as = dragOverLooksLikeAsset(e.dataTransfer)
       if (!hi && !as) return false
       if (hi) dismissActiveReorderLane()
       e.preventDefault()
@@ -303,7 +297,7 @@ export function HierarchyPanel() {
       const reorderVisual = panel.classList.contains('hierarchyPanelRootDragging')
       const ty = [...dt.types]
       const hi = isReorderDragEvidence(ty, reorderVisual)
-      const as = ty.includes(MIME_ASSET)
+      const as = dragOverLooksLikeAsset(dt)
       if (!hi && !as) return
       if (hi) {
         reorderLaneDismissRef.current?.()
@@ -370,11 +364,11 @@ export function HierarchyPanel() {
             title="Drag — drop on another row to parent, between rows to reorder"
             onDragStart={(ev) => {
               ev.stopPropagation()
-              ev.dataTransfer.setData(MIME_H_NODE, n.id)
-              ev.dataTransfer.setData(MIME_H_NODE_ALT, n.id)
+              ev.dataTransfer.setData(MIME_HIERARCHY_NODE, n.id)
+              ev.dataTransfer.setData(MIME_HIERARCHY_NODE_ALT, n.id)
               ev.dataTransfer.setData(
                 'text/plain',
-                `${MIME_HNODE_PLAINTEXT_PREFIX}${n.id}`,
+                `${HIERARCHY_NODE_PLAINTEXT_PREFIX}${n.id}`,
               )
               ev.dataTransfer.effectAllowed = 'copyMove'
               const host = ev.currentTarget as HTMLElement
@@ -581,7 +575,7 @@ export function HierarchyPanel() {
           const aidMime = e.dataTransfer.getData(MIME_ASSET).trim()
           const aidPlainRaw = e.dataTransfer.getData('text/plain').trim()
           const aidPlain =
-            aidPlainRaw && !aidPlainRaw.startsWith(MIME_HNODE_PLAINTEXT_PREFIX)
+            aidPlainRaw && !aidPlainRaw.startsWith(HIERARCHY_NODE_PLAINTEXT_PREFIX)
               ? aidPlainRaw
               : ''
           const aid = aidMime || aidPlain

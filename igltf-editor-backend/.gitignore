@@ -4,3 +4,6 @@ data/
 __pycache__/
 *.pyc
 .python-version
+
+# PyInstaller intermediate output
+/pyinstaller-build/

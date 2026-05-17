@@ -10,6 +10,18 @@ dependencies = [
     "python-multipart>=0.0.9",
     "uvicorn[standard]>=0.32.0,<1",
     "pydantic>=2.9.0,<3",
+    "pygltflib>=1.16.5",
+    "mcp>=1.13.0",
+    "watchfiles>=1.0,<2",
+]
+
+[project.optional-dependencies]
+packaging = [
+    "pyinstaller>=6.6,<8",
+]
+dev = [
+    "httpx>=0.27,<1",
+    "pytest>=8.0,<10",
 ]
 
 [build-system]
@@ -18,3 +30,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"authoring_kit" = "authoring_kit"

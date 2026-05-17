@@ -6,14 +6,24 @@ import {
   normalizeFolderSegments,
   normalizeLogicalFolder,
 } from './folderUtils'
+import { DEFAULT_SCRIPT_TEMPLATE } from '@/scriptRuntime/monacoSetup'
+import { INTERACTION_TEMPLATE_MENU, type InteractionTemplateKind } from '@/scriptRuntime/interactionScriptTemplates'
+import { catalogAssetStem, isGltfAssetEntry, isScriptAssetEntry } from './assetUtils'
+import { MIME_ASSET, dragOverLooksLikeAsset } from './dndTypes'
+import { isApiConfigured, renameScriptStem } from '@/api/projectApi'
+import { ScriptAssetEditor } from './ScriptAssetEditor'
+import type { ScriptRole, ProjectAssetEntry } from './types'
 import './panels.css'
-
-const MIME_ASSET = 'application/x-igltf-asset'
 
 function fileExtensionLabel(relativePath: string): string {
   const base = relativePath.trim().replace(/^.*[/\\]/, '')
   const m = /\.([a-z0-9]{1,16})$/i.exec(base)
   return m?.[1] ? m[1].toUpperCase() : '—'
+}
+
+function assetExplorerLabel(entry: ProjectAssetEntry): string {
+  if (isScriptAssetEntry(entry)) return catalogAssetStem(entry.relativePath)
+  return (entry.name && entry.name.trim()) || `${entry.relativePath}`
 }
 
 function allCatalogPathSet(
@@ -87,7 +97,7 @@ export function AssetsCatalogTree() {
               type="button"
               className="catalogFolderRow"
               onDragOver={(e) => {
-                if ([...e.dataTransfer.types].includes(MIME_ASSET)) {
+                if (dragOverLooksLikeAsset(e.dataTransfer)) {
                   e.preventDefault()
                   e.dataTransfer.dropEffect = 'move'
                 }
@@ -141,20 +151,23 @@ export function AssetsCatalogTree() {
   )
 }
 
-type AssetMenuState = { clientX: number; clientY: number; assetId: string }
+type AssetMenuState = { clientX: number; clientY: number; assetId: string | null }
 
 /** Right column: breadcrumb, filtered list, footer, properties (US-SK-062 … 065). */
 export function AssetsExplorerPanel() {
   const {
+    projectId,
     projectAssets,
     assetExplorerPath,
     panelFocus,
     setPanelFocus,
     setAssetExplorerPath,
     addGltfFromFile,
+    addInteractionScriptAsset,
     deleteProjectAssetsConfirm,
     updateProjectAsset,
     addExplicitAssetFolder,
+    assetsDiskWatch,
   } = useEditor()
 
   const [filter, setFilter] = useState('')
@@ -185,7 +198,7 @@ export function AssetsExplorerPanel() {
     return projectAssets.filter((a) => {
       if (!isUnderFolder(normalizeLogicalFolder(a.logicalFolder), assetExplorerPath)) return false
       if (!fq) return true
-      const label = ((a.name && a.name.trim()) || `${a.relativePath}`).toLowerCase()
+      const label = assetExplorerLabel(a).toLowerCase()
       return label.includes(fq)
     })
   }, [projectAssets, assetExplorerPath, filter])
@@ -234,10 +247,51 @@ export function AssetsExplorerPanel() {
     updateProjectAsset(assetId, { name: nn.trim() })
   }
 
+  async function openRenameScriptStemPrompt(assetId: string) {
+    const a = projectAssets.find((x) => x.assetId === assetId)
+    if (!a || !isScriptAssetEntry(a)) return
+    if (!isApiConfigured()) {
+      window.alert('Connect the authoring API so the backend can rename the script file.')
+      return
+    }
+    const stem0 = catalogAssetStem(a.relativePath)
+    const next = window.prompt('Rename script — new filename stem (no extension)', stem0)
+    if (!next?.trim()) return
+    try {
+      const res = await renameScriptStem(projectId, assetId, next.trim())
+      updateProjectAsset(assetId, {
+        relativePath: res.relativePath,
+        scriptExports: [...res.scriptExports],
+        name: undefined,
+      })
+      if (res.mismatch) {
+        window.alert(
+          'The file stem was renamed, but this script still exports a different class name. Rename the exported class in the editor to match the stem, or revert the rename.',
+        )
+      }
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : String(e))
+    }
+  }
+
   function deleteAssetsByMenu(assetIds: string[]) {
     deleteProjectAssetsConfirm(assetIds)
     clearAssetSelection()
     setMenu(null)
+  }
+
+  async function createInteractionFromTemplate(kind: InteractionTemplateKind) {
+    setMenu(null)
+    try {
+      const folderLogical = normalizeFolderSegments(assetExplorerPath)
+      const id = await addInteractionScriptAsset(kind, {
+        logicalFolder: folderLogical || undefined,
+      })
+      setSelectedAssetId(id)
+      setPanelFocus('assets')
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : String(e))
+    }
   }
 
   return (
@@ -283,11 +337,26 @@ export function AssetsExplorerPanel() {
           </div>
         </div>
 
+        {(assetsDiskWatch === 'connecting' || assetsDiskWatch === 'error') && (
+          <div className={`assetsDiskWatchHint assetsDiskWatchHint--${assetsDiskWatch}`} role="status">
+            {assetsDiskWatch === 'connecting'
+              ? 'Connecting disk sync…'
+              : 'Disk sync offline — reconnecting…'}
+          </div>
+        )}
+
         <div className="assetsExplorerMiddleRow">
           <div className="assetsExplorerListPane">
             <div
               className="assetsExplorerListScroll"
               role="list"
+              onContextMenu={(e) => {
+                const row = (e.target as HTMLElement).closest('.assetsExplorerRowFlat')
+                if (row) return
+                e.preventDefault()
+                clearAssetSelection()
+                setMenu({ clientX: e.clientX, clientY: e.clientY, assetId: null })
+              }}
               onMouseDown={(ev) => {
                 ev.stopPropagation()
                 const row = (ev.target as HTMLElement).closest('.assetsExplorerRowFlat')
@@ -326,7 +395,12 @@ export function AssetsExplorerPanel() {
                         ev.dataTransfer.effectAllowed = 'copyMove'
                       }}
                     >
-                      {(a.name && a.name.trim()) || `${a.relativePath}`}
+                      {assetExplorerLabel(a)}
+                      {isScriptAssetEntry(a) ? (
+                        <span className="assetsKindBadge assetsKindBadgeScript">script</span>
+                      ) : isGltfAssetEntry(a) ? (
+                        <span className="assetsKindBadge assetsKindBadgeGltf">gltf</span>
+                      ) : null}
                       {a.logicalFolder ? (
                         <span className="assetLogicalPath"> · {normalizeLogicalFolder(a.logicalFolder)}</span>
                       ) : null}
@@ -361,17 +435,31 @@ export function AssetsExplorerPanel() {
                   role="menu"
                   onMouseDown={(ev) => ev.stopPropagation()}
                 >
-                  <button
-                    type="button"
-                    className="contextMenuItem"
-                    role="menuitem"
-                    onClick={() => {
-                      openRenamePromptFor(selectedAsset.assetId)
-                      setPropsMenuOpen(false)
-                    }}
-                  >
-                    Rename label…
-                  </button>
+                  {isScriptAssetEntry(selectedAsset) ? (
+                    <button
+                      type="button"
+                      className="contextMenuItem"
+                      role="menuitem"
+                      onClick={() => {
+                        void openRenameScriptStemPrompt(selectedAsset.assetId)
+                        setPropsMenuOpen(false)
+                      }}
+                    >
+                      Rename script file…
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="contextMenuItem"
+                      role="menuitem"
+                      onClick={() => {
+                        openRenamePromptFor(selectedAsset.assetId)
+                        setPropsMenuOpen(false)
+                      }}
+                    >
+                      Rename label…
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="contextMenuItem danger"
@@ -385,22 +473,64 @@ export function AssetsExplorerPanel() {
             </div>
             <div className="assetsPropsInner">
               {selectedAsset ? (
-                <div className="assetsPropsRow">
-                  <div className="assetsPropsPreview">{fileExtensionLabel(selectedAsset.relativePath)}</div>
-                  <div className="assetsPropsTexts">
-                    <p className="assetsPropsPrimary" title={selectedAsset.assetId}>
-                      {(selectedAsset.name && selectedAsset.name.trim()) ||
-                        selectedAsset.relativePath}
-                    </p>
-                    <p className="assetsPropsMuted">{selectedAsset.relativePath}</p>
-                    <p className="assetsPropsMuted">
-                      {normalizeLogicalFolder(selectedAsset.logicalFolder)
-                        ? `${normalizeLogicalFolder(selectedAsset.logicalFolder)}`
-                        : 'Project root'}
-                      <span className="assetLogicalPath"> · id {selectedAsset.assetId}</span>
-                    </p>
+                <>
+                  <div className="assetsPropsRow">
+                    <div className="assetsPropsPreview">{fileExtensionLabel(selectedAsset.relativePath)}</div>
+                    <div className="assetsPropsTexts">
+                      <p className="assetsPropsPrimary" title={selectedAsset.assetId}>
+                        {assetExplorerLabel(selectedAsset)}
+                      </p>
+                      <p className="assetsPropsMuted">{selectedAsset.relativePath}</p>
+                      <p className="assetsPropsMuted">
+                        {normalizeLogicalFolder(selectedAsset.logicalFolder)
+                          ? `${normalizeLogicalFolder(selectedAsset.logicalFolder)}`
+                          : 'Project root'}
+                        <span className="assetLogicalPath"> · id {selectedAsset.assetId}</span>
+                      </p>
+                    </div>
                   </div>
-                </div>
+                  {isScriptAssetEntry(selectedAsset) ? (
+                    <>
+                      {selectedAsset.interactionKind ? (
+                        <p className="assetsPropsMuted" style={{ marginTop: 6 }}>
+                          Interaction template:{' '}
+                          {INTERACTION_TEMPLATE_MENU.find((x) => x.kind === selectedAsset.interactionKind)
+                            ?.label ?? selectedAsset.interactionKind}
+                        </p>
+                      ) : null}
+                      <label className="inspectorBoolRow" style={{ marginTop: 8 }}>
+                        <span className="inspectorBoolLbl">Script role</span>
+                        <select
+                          className="vecInput"
+                          style={{ flex: 1, maxWidth: 180 }}
+                          value={selectedAsset.scriptRole ?? 'interaction'}
+                          onChange={(ev) =>
+                            updateProjectAsset(selectedAsset.assetId, {
+                              scriptRole: ev.target.value as ScriptRole,
+                            })
+                          }
+                        >
+                          <option value="interaction">interaction</option>
+                          <option value="behaviour">behaviour</option>
+                        </select>
+                      </label>
+                      <div className="inspectorBoolRow" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+                        <span className="inspectorBoolLbl">Exported class name</span>
+                        <p className="assetsPropsMuted" style={{ margin: 0 }}>
+                          This must match the file stem (<code>{catalogAssetStem(selectedAsset.relativePath)}</code>
+                          ).
+                          <br />
+                          Catalog value now:{' '}
+                          <code>{selectedAsset.scriptExports?.[0] ?? '(unspecified)'}</code>
+                        </p>
+                      </div>
+                      <ScriptAssetEditor
+                        asset={selectedAsset}
+                        key={`${selectedAsset.assetId}:${selectedAsset.relativePath}`}
+                      />
+                    </>
+                  ) : null}
+                </>
               ) : (
                 <p className="assetsPropsPlaceholder">Nothing selected</p>
               )}
@@ -413,7 +543,7 @@ export function AssetsExplorerPanel() {
             ref={importRef}
             type="file"
             className="fileMenuHiddenInput"
-            accept=".glb,.gltf,model/gltf-binary,model/gltf+json"
+            accept=".glb,.gltf,.js,.mjs,.cjs,model/gltf-binary,model/gltf+json,text/javascript"
             multiple
             onChange={(ev) => {
               void onImportFiles(ev.target.files)
@@ -422,6 +552,43 @@ export function AssetsExplorerPanel() {
           />
           <button type="button" className="footerToolbarBtn" onClick={() => importRef.current?.click()}>
             Import
+          </button>
+          <select
+            className="footerToolbarSelectSketch"
+            aria-label="New interaction from template"
+            defaultValue=""
+            onChange={(ev) => {
+              const v = ev.target.value as InteractionTemplateKind | ''
+              ev.target.value = ''
+              if (!v) return
+              void createInteractionFromTemplate(v)
+            }}
+          >
+            <option value="">New interaction…</option>
+            {INTERACTION_TEMPLATE_MENU.map(({ kind, label }) => (
+              <option key={kind} value={kind}>
+                {label}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            className="footerToolbarBtn"
+            title="Create a new ES module script in this folder"
+            onClick={() => {
+              const f = new File([DEFAULT_SCRIPT_TEMPLATE], 'ExampleInteraction.js', {
+                type: 'text/javascript',
+              })
+              void (async () => {
+                try {
+                  await addGltfFromFile(f)
+                } catch (e) {
+                  window.alert(e instanceof Error ? e.message : String(e))
+                }
+              })()
+            }}
+          >
+            New script
           </button>
           <button
             type="button"
@@ -463,25 +630,66 @@ export function AssetsExplorerPanel() {
             onMouseDown={(e) => e.stopPropagation()}
             style={{ left: menu.clientX, top: menu.clientY }}
           >
-            <button
-              type="button"
-              className="contextMenuItem"
-              role="menuitem"
-              onClick={() => {
-                openRenamePromptFor(menu.assetId)
-                setMenu(null)
-              }}
-            >
-              Rename label…
-            </button>
-            <button
-              type="button"
-              className="contextMenuItem danger"
-              role="menuitem"
-              onClick={() => deleteAssetsByMenu([menu.assetId])}
-            >
-              Delete…
-            </button>
+            <div className="contextMenuStaticRow contextMenuItemWithSub" role="presentation" tabIndex={-1}>
+              New interaction<span className="contextMenuCaretSub">▸</span>
+              <div className="contextMenuSub" role="presentation">
+                {INTERACTION_TEMPLATE_MENU.map(({ kind, label }) => (
+                  <button
+                    key={kind}
+                    type="button"
+                    className="contextMenuItem"
+                    role="menuitem"
+                    onClick={() => void createInteractionFromTemplate(kind)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {menu.assetId ? (
+              <>
+                {(() => {
+                  const row = projectAssets.find((x) => x.assetId === menu.assetId)
+                  if (!row) return null
+                  if (isScriptAssetEntry(row)) {
+                    return (
+                      <button
+                        type="button"
+                        className="contextMenuItem"
+                        role="menuitem"
+                        onClick={() => {
+                          void openRenameScriptStemPrompt(menu.assetId!)
+                          setMenu(null)
+                        }}
+                      >
+                        Rename script file…
+                      </button>
+                    )
+                  }
+                  return (
+                    <button
+                      type="button"
+                      className="contextMenuItem"
+                      role="menuitem"
+                      onClick={() => {
+                        openRenamePromptFor(menu.assetId!)
+                        setMenu(null)
+                      }}
+                    >
+                      Rename label…
+                    </button>
+                  )
+                })()}
+                <button
+                  type="button"
+                  className="contextMenuItem danger"
+                  role="menuitem"
+                  onClick={() => deleteAssetsByMenu([menu.assetId!])}
+                >
+                  Delete…
+                </button>
+              </>
+            ) : null}
           </div>
         </div>
       ) : null}

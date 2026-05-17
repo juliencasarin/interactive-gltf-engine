@@ -1,10 +1,13 @@
-import { useParams } from 'react-router-dom'
+import { Navigate, useParams } from 'react-router-dom'
 import { EditorProvider } from '@/editor/EditorContext'
 import { EditorShell } from '@/layout/EditorShell'
 
 export function EditorPage() {
   const { id } = useParams<{ id: string }>()
-  const sceneId = id ?? 'test'
+  if (!id) {
+    return <Navigate to="/" replace />
+  }
+  const sceneId = id
 
   return (
     <EditorProvider projectId={sceneId}>

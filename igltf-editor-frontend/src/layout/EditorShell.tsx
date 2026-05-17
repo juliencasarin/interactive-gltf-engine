@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
+import { isApiConfigured, isOpenIdeEnabled, postBuildPlayGlb } from '@/api/projectApi'
 import { FileMenu } from '@/editor/FileMenu'
+import { OpenInIdeButton } from '@/editor/OpenInIdeButton'
 import { useEditor } from '@/editor/EditorContext'
+import { EditorToolsBar } from '@/editor/EditorToolsBar'
 import { AssetsCatalogTree, AssetsExplorerPanel } from '@/editor/AssetsPanel'
 import { HierarchyPanel } from '@/editor/HierarchyPanel'
 import { InspectorPanel } from '@/editor/InspectorPanel'
@@ -18,9 +22,14 @@ function initialProjectPath(sceneId: string): string {
 }
 
 const GLTF_EXT = /\.(glb|gltf)$/i
+const SCRIPT_EXT = /\.(js|mjs|cjs)$/i
 
 function isGltfName(name: string): boolean {
   return GLTF_EXT.test(name)
+}
+
+function isImportableAssetName(name: string): boolean {
+  return isGltfName(name) || SCRIPT_EXT.test(name)
 }
 
 export type EditorShellProps = {
@@ -28,8 +37,11 @@ export type EditorShellProps = {
 }
 
 export function EditorShell({ sceneId }: EditorShellProps) {
-  const { dirty, addGltfFromFile, setPanelFocus, loadError } = useEditor()
+  const navigate = useNavigate()
+  const { dirty, addGltfFromFile, setPanelFocus, loadError, saveProjectToServer } = useEditor()
   const projectPath = initialProjectPath(sceneId)
+  const [buildModalOpen, setBuildModalOpen] = useState(false)
+  const [building, setBuilding] = useState(false)
   const mainDisplayRef = useRef<HTMLDivElement>(null)
 
   const [hierarchyW, setHierarchyW] = useState(268)
@@ -173,10 +185,10 @@ export function EditorShell({ sceneId }: EditorShellProps) {
       e.preventDefault()
       const files = e.dataTransfer.files
       if (!files?.length) return
-      const gltfs = Array.from(files).filter((f) => isGltfName(f.name))
-      if (!gltfs.length) return
+      const accepted = Array.from(files).filter((f) => isImportableAssetName(f.name))
+      if (!accepted.length) return
       try {
-        for (const f of gltfs) {
+        for (const f of accepted) {
           await addGltfFromFile(f)
         }
       } catch (err) {
@@ -186,6 +198,42 @@ export function EditorShell({ sceneId }: EditorShellProps) {
     [addGltfFromFile],
   )
 
+  const runBuildAndPlay = useCallback(async () => {
+    setBuilding(true)
+    try {
+      await postBuildPlayGlb(sceneId)
+      setBuildModalOpen(false)
+      navigate(`/play/${encodeURIComponent(sceneId)}`)
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBuilding(false)
+    }
+  }, [navigate, sceneId])
+
+  const onClickBuildGltf = useCallback(() => {
+    if (!isApiConfigured()) {
+      window.alert('API is not configured (set VITE_API_BASE_URL). Cannot build.')
+      return
+    }
+    if (dirty) setBuildModalOpen(true)
+    else void runBuildAndPlay()
+  }, [dirty, runBuildAndPlay])
+
+  const onSaveAndBuild = useCallback(async () => {
+    setBuilding(true)
+    try {
+      await saveProjectToServer()
+      await postBuildPlayGlb(sceneId)
+      setBuildModalOpen(false)
+      navigate(`/play/${encodeURIComponent(sceneId)}`)
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBuilding(false)
+    }
+  }, [navigate, saveProjectToServer, sceneId])
+
   return (
     <div className="editor">
       <div
@@ -194,12 +242,13 @@ export function EditorShell({ sceneId }: EditorShellProps) {
         onDrop={onDropShell}
       >
         <div className="toolbar">
+          <Link className="toolbarBtn" to="/">
+            Projects
+          </Link>
           <div className="fileMenuToolbarSlot">
             <FileMenu projectBasename={sceneId} />
           </div>
-          <button type="button" className="toolbarBtn">
-            Settings
-          </button>
+          {isOpenIdeEnabled() ? <OpenInIdeButton projectId={sceneId} /> : null}
           <span className="projectPath" title={projectPath}>
             {projectPath}
             {dirty ? ' *' : ''}
@@ -208,8 +257,18 @@ export function EditorShell({ sceneId }: EditorShellProps) {
 
         <div className="windowContainer">
           <div className="toolbar2">
-            <div className="toolsPlaceholder">Tools (placeholder)</div>
-            <div className="serverPlaceholder">Play manifest (placeholder)</div>
+            <EditorToolsBar />
+            <div className="buildToolbarActions">
+              <button
+                type="button"
+                className="toolbarBtn buildGltfBtn"
+                disabled={building}
+                title="Write build/scene.glb from the saved project and open Play"
+                onClick={onClickBuildGltf}
+              >
+                {building ? 'Building…' : 'Build glTF'}
+              </button>
+            </div>
           </div>
 
           <div className="mainDisplay" ref={mainDisplayRef}>
@@ -303,6 +362,47 @@ export function EditorShell({ sceneId }: EditorShellProps) {
           </button>
         </div>
       </div>
+
+      {buildModalOpen ? (
+        <div
+          className="modalBackdrop"
+          role="presentation"
+          onMouseDown={(ev) => {
+            if (ev.target === ev.currentTarget && !building) setBuildModalOpen(false)
+          }}
+        >
+          <div
+            className="modalDialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="buildModalTitle"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <h2 id="buildModalTitle" className="modalTitle">
+              Unsaved changes
+            </h2>
+            <p className="modalBody">Save the project before building?</p>
+            <div className="modalActions">
+              <button
+                type="button"
+                className="toolbarBtn modalBtn"
+                disabled={building}
+                onClick={() => !building && setBuildModalOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="toolbarBtn modalBtn modalBtnPrimary"
+                disabled={building}
+                onClick={() => void onSaveAndBuild()}
+              >
+                {building ? 'Saving…' : 'Save & build'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }
