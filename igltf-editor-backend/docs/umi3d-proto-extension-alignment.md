@@ -18,7 +18,8 @@ The goal of the prototype is **ASAP parity for authoring → Play click → scri
   - **`scriptHandlerId`**: exported class name (`ProjectAsset.scriptExports[0]`), i.e. registry key for `loadModuleScriptIntoRegistry`.
   - **`scriptAssetRef`** / **`scriptRelativePath`**: resolve script source via `GET /files/{projectId}/{relativePath}`.
   - **`serializedProps`**: inspector overrides (merged into the class instance before `onLoaded` / handler), same spirit as editor `InteractionScriptAttachment.serializedProps`.
-  - **Prototype default:** if **`targetId`** is absent, the exporter sets it to the **placement outer glTF node index** (string digits) so `GLTF.getObjectByUmi3dId` resolves without manual authoring.
+  - **`targetId` semantics:** it refers to a **glTF `nodes[]` index in the emitted `scene.glb`**, not the catalogue file. If **`targetId`** is absent, the exporter sets it to the **authoring row's merged glTF node index** (string digits) so `GLTF.getObjectByUmi3dId` resolves without manual authoring; this may be the outer placement node **or** any **expanded interior** mirror row mapped after merge.
+  - **Interior mirrors:** interactions may attach to **deep** catalogue meshes whenever rows carry **`sourceGltfNodeIndex`** (mirror rows may live anywhere in the authoring hierarchy; **`sourcePlacementId`** ties detached mirrors to their host placement — see **`gltf-interior-editing-limits.md`**); payloads still live on **`nodes[].extensions`** in the merged asset.
   - **`dto`**: minimal stub with **`interactionType`** (mirrors `interactionKind`) and optional **`hold`** (UMI3D `EventDto.hold`); animations / `icon2D` / `uiLinkId` / ulong **entity ids** are **not** modeled.
 
 ## Major divergences to align later

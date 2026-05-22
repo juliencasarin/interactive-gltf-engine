@@ -60,3 +60,29 @@
   padding: 0 24px;
   text-align: center;
 }
+
+.playFooter {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  height: 22px;
+  padding: 0 12px;
+  background: rgb(29, 29, 29);
+  color: rgb(170, 170, 170);
+  font-size: 11px;
+  font-family: ui-monospace, 'Cascadia Code', 'Consolas', monospace;
+  user-select: none;
+  pointer-events: none;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.playFooterSep {
+  color: rgb(100, 100, 100);
+}
+
+.playFooterMuted {
+  color: rgb(120, 120, 120);
+}

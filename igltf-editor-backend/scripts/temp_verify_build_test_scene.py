@@ -23,6 +23,7 @@ from pygltflib import GLTF2
 
 from app.build_play_glb import build_scene_to_play_glb, mesh_count_under_default_scene
 from app.igltf_umi3d_proto import EXT_IGLTF_UMI3D_PROTO
+from app.interactive_gltf_ext import EXT_INTERACTIVE_GLTF
 from app.storage import get_storage_root
 
 
@@ -134,6 +135,15 @@ def main() -> None:
             )
 
     assert EXT_IGLTF_UMI3D_PROTO in (gltf.extensionsUsed or [])
+    assert EXT_INTERACTIVE_GLTF in (gltf.extensionsUsed or [])
+    root_ext = gltf.extensions or {}
+    assert EXT_INTERACTIVE_GLTF in root_ext
+    scripts_manifest = root_ext[EXT_INTERACTIVE_GLTF]["scripts"]
+    assert len(scripts_manifest) == 1 and scripts_manifest[0]["uri"] == "scene.js"
+
+    scene_js = proj_dir / "build" / "scene.js"
+    assert scene_js.is_file(), f"missing bundled script {scene_js}"
+
     duck1_outer_idx = root.children[0]
     d1ext = gltf.nodes[duck1_outer_idx].extensions or {}
     assert EXT_IGLTF_UMI3D_PROTO in d1ext, "Duck 1 outer node should carry prototype interaction extension"

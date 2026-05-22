@@ -53,11 +53,15 @@ from app.storage import (
     resolve_project_root,
 )
 from app.version_info import ENGINE_VERSION
+from pygltflib import GLTF2
+
+from app.gltf_interior_hierarchy import catalog_interior_manifest
 
 _MAX_UPLOAD_MB = int(os.environ.get("MAX_UPLOAD_MB", "200"))
 _MAX_SCRIPT_UPLOAD_MB = int(os.environ.get("MAX_SCRIPT_UPLOAD_MB", "8"))
 
 PLAY_GLB_REL = Path("build") / "scene.glb"
+PLAY_SCENE_JS_REL = Path("build") / "scene.js"
 
 
 def _canonical_rel_asset(p: str) -> str:
@@ -335,6 +339,43 @@ def get_asset_source(project_id: str, asset_id: str) -> PlainTextResponse:
     return PlainTextResponse(disk.read_text(encoding="utf-8"))
 
 
+@app.get("/projects/{project_id}/assets/{asset_id}/gltf-interior-manifest")
+def get_gltf_interior_manifest(project_id: str, asset_id: str) -> dict[str, object]:
+    """Preorder table of default‑scene nodes for expanding a catalogue ``.glb`` in the editor."""
+
+    try:
+        ensure_project_layout(project_id)
+        base = project_dir(project_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    pj = project_json_path(project_id)
+    if not pj.is_file():
+        raise HTTPException(status_code=404, detail="project not persisted")
+    doc = ProjectDocumentV2.model_validate_json(pj.read_text(encoding="utf-8"))
+    match = next((a for a in doc.assets if a.assetId == asset_id), None)
+    if match is None:
+        raise HTTPException(status_code=404, detail="unknown asset")
+    rel = match.relativePath.lstrip("/").replace("\\", "/")
+    disk = (base / rel).resolve()
+    try:
+        disk.relative_to(base.resolve())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="invalid asset path") from exc
+    if not disk.is_file():
+        raise HTTPException(status_code=404, detail="asset file missing")
+    if disk.suffix.lower() != ".glb":
+        raise HTTPException(status_code=400, detail="interior manifest supports .glb only")
+    try:
+        loaded = GLTF2().load_binary(str(disk))
+    except (OSError, ValueError) as e:
+        raise HTTPException(status_code=500, detail=f"cannot parse glb: {e}") from e
+
+    manifest = catalog_interior_manifest(loaded)
+    manifest.setdefault("assetId", asset_id)
+    manifest.setdefault("relativePath", rel.replace("\\", "/"))
+    return manifest
+
+
 @app.put("/projects/{project_id}/assets/{asset_id}/source")
 def put_asset_source(project_id: str, asset_id: str, body: AssetSourceBody) -> dict[str, str]:
     try:
@@ -534,7 +575,11 @@ def post_build_play_glb(project_id: str) -> dict[str, str]:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except OSError as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
-    return {"status": "ok", "relativePath": PLAY_GLB_REL.as_posix()}
+    pj_base = project_dir(project_id)
+    out: dict[str, str] = {"status": "ok", "relativePath": PLAY_GLB_REL.as_posix()}
+    if (pj_base / PLAY_SCENE_JS_REL).is_file():
+        out["jsRelativePath"] = PLAY_SCENE_JS_REL.as_posix()
+    return out
 
 
 @app.get("/play/{project_id}")
@@ -564,8 +609,8 @@ def play_manifest(project_id: str) -> dict[str, str]:
         )
     out: dict[str, str] = {"glbUrl": file_url(project_id, glb_rel)}
     js_candidates = [
-        base / "build" / "play.js",
         base / "build" / "scene.js",
+        base / "build" / "play.js",
         base / "test.js",
     ]
     for jp in js_candidates:

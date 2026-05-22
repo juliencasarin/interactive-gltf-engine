@@ -21,7 +21,7 @@ Portable format definitions (**`proposals/`**, **`specifications/`**) live in th
 - **`igltf-editor-frontend`** + **`igltf-editor-backend`** wired together.
 - **No authentication.**
 - **`projects.json` hub** + studio API on the backend: workspaces can live **anywhere on disk**; **`STORAGE_ROOT` / `IGLTF_APP_DATA_DIR`** keeps the registry (**`projects.json`**) and optional slug-only workspaces (e.g. `data/test`).
-- **Play build output:** **`build/scene.glb`** (legacy **`test.glb`** still supported). Optional JS alongside glb (**`build/play.js`**, root **`test.js`**, …).
+- **Play build output:** **`build/scene.glb`** (legacy **`test.glb`** still supported). Optional bundled script **`build/scene.js`** (then **`build/play.js`**, root **`test.js`**, …).
 - **`GET /play/{id}`** returns absolute **`glbUrl`** / **`jsUrl`** URLs as before.
 - **CORS** for the frontend dev server (e.g. `http://localhost:5173`) and production origin behind a reverse proxy.
 - **Authoring persistence (near-term):** `project.json` + asset files per project id on the backend; **no** merged shipping `glb` in that phase. See [`docs/project-json-phase-plan.md`](docs/project-json-phase-plan.md).

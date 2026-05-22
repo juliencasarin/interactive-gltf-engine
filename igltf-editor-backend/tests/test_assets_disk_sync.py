@@ -99,6 +99,47 @@ def test_disk_sync_drops_catalog_row_when_asset_file_removed(monkeypatch: pytest
     assert doc2.assets == []
 
 
+def test_disk_sync_scrubs_script_dep_refs_when_dependency_removed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    ws = tmp_path / "proj-deps"
+    _bind_workspace(monkeypatch, ws)
+    aid_dep = "aaaaaaaa-bbbb-4ccc-dddd-eeeeeeeeaaaa"
+    aid_child = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb"
+    rel_dep = f"assets/{aid_dep}.js"
+    rel_child = f"assets/{aid_child}.js"
+    for rel in (rel_dep, rel_child):
+        (ws / rel).parent.mkdir(parents=True, exist_ok=True)
+        (ws / rel).write_text("export class X {}\n", encoding="utf-8")
+
+    assets = [
+        ProjectAsset(
+            assetId=aid_dep,
+            relativePath=rel_dep,
+            assetKind="script",
+            scriptRole="interaction",
+            scriptExports=["X"],
+        ),
+        ProjectAsset(
+            assetId=aid_child,
+            relativePath=rel_child,
+            assetKind="script",
+            scriptRole="interaction",
+            scriptExports=["Y"],
+            scriptDependsOnAssetIds=[aid_dep],
+        ),
+    ]
+    (ws / "project.json").write_text(_minimal_doc(assets).model_dump_json(indent=2), encoding="utf-8")
+
+    (ws / rel_dep).unlink()
+
+    asyncio.run(ads.sync_assets_from_disk_async("pid-any"))
+
+    doc2 = ProjectDocumentV2.model_validate_json((ws / "project.json").read_text(encoding="utf-8"))
+    assert len(doc2.assets) == 1
+    left = doc2.assets[0]
+    assert left.assetId == aid_child
+    assert left.scriptDependsOnAssetIds in (None, [])
+
+
 def test_apply_document_keeps_asset_after_prior_disk_sync(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     ws = tmp_path / "proj3"
     _bind_workspace(monkeypatch, ws)

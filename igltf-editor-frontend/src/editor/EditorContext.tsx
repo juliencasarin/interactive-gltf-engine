@@ -11,15 +11,31 @@ import {
 import {
   assetsWatchUrl,
   fetchDocument,
+  fetchGltfInteriorManifest,
   isApiConfigured,
   putDocument,
   uploadAssetStage,
+  type GltfInteriorManifest,
 } from '@/api/projectApi'
 import { buildInteractionScriptTemplate, type InteractionTemplateKind } from '@/scriptRuntime/interactionScriptTemplates'
 import { normalizeFolderSegments, normalizeLogicalFolder } from './folderUtils'
+import {
+  catalogueGlbAssetIds,
+  cataloguePlacementAncestorId,
+  interiorReparentForbidden,
+  placementHasExpandedInterior,
+  resolveInteriorHostPlacementId,
+} from './interiorPlacementContext'
 import { readFileAsDataUrl, readFileAsText, interactionAttachmentsFromDiskNode, newAttachmentId, toProjectFileV2 } from './projectIo'
 import type { EditorNode, InteractionScriptAttachment, PanelFocus, ProjectAssetEntry, ProjectFileV2, Vec3 } from './types'
 import { inferAssetKindFromPath, isGltfAssetEntry } from './assetUtils'
+import {
+  applyReparentTransform,
+  type ReparentOptions,
+  type TransformSpace,
+} from './transformMath'
+
+export type { ReparentOptions, TransformSpace } from './transformMath'
 
 function stripEphemeralScriptSources(assets: ProjectAssetEntry[]): ProjectAssetEntry[] {
   return assets.map((a) => {
@@ -31,6 +47,48 @@ function stripEphemeralScriptSources(assets: ProjectAssetEntry[]): ProjectAssetE
 
 function uid(): string {
   return globalThis.crypto?.randomUUID?.() ?? `n_${Math.random().toString(36).slice(2)}`
+}
+
+function buildInteriorMirrorNodesFromManifest(
+  placementNodeId: string,
+  catalogueAssetRef: string,
+  manifest: GltfInteriorManifest,
+): EditorNode[] {
+  const rowsByIdx = new Map(manifest.nodes.map((r) => [r.index, r]))
+  const preorder = manifest.preorderIndices
+  const idForGltfIndex = new Map<number, string>()
+  const appended: EditorNode[] = []
+
+  for (let i = 0; i < preorder.length; i += 1) {
+    const gi = preorder[i]!
+    const row = rowsByIdx.get(gi)
+    if (!row) continue
+    if (row.hasSkin && typeof console !== 'undefined')
+      console.warn(
+        `[igltf] expanded node "${row.name}" (index ${gi}) is skinned — export/build will reject until skins are supported`,
+      )
+
+    const nid = uid()
+    idForGltfIndex.set(gi, nid)
+
+    let parentEditor: string | null = placementNodeId
+    if (row.parentIndex !== null && row.parentIndex !== undefined) {
+      parentEditor = idForGltfIndex.get(row.parentIndex) ?? parentEditor
+    }
+
+    appended.push({
+      id: nid,
+      name: row.name,
+      parentId: parentEditor,
+      position: [0, 0, 0],
+      rotation: [0, 0, 0],
+      scale: [1, 1, 1],
+      sourceAssetRef: catalogueAssetRef,
+      sourceGltfNodeIndex: gi,
+    })
+  }
+
+  return appended
 }
 
 function defaultNodes(): EditorNode[] {
@@ -64,6 +122,90 @@ function wouldCycle(nodes: EditorNode[], nodeId: string, newParentId: string): b
     cur = byId.get(cur)?.parentId ?? null
   }
   return false
+}
+
+function collectPreorderSubtreeIds(nodes: EditorNode[], rootId: string): Set<string> {
+  const byParent = new Map<string, string[]>()
+  for (const n of nodes) {
+    if (n.parentId) {
+      const list = byParent.get(n.parentId) ?? []
+      list.push(n.id)
+      byParent.set(n.parentId, list)
+    }
+  }
+  const out = new Set<string>()
+  const stack = [rootId]
+  while (stack.length) {
+    const id = stack.pop()!
+    if (out.has(id)) continue
+    out.add(id)
+    for (const c of byParent.get(id) ?? []) stack.push(c)
+  }
+  return out
+}
+
+/** After reparent, keep `sourcePlacementId` in sync for mirrors moved outside an implicit catalogue placement. */
+function patchInteriorMirrorsAfterReparent(
+  before: EditorNode[],
+  relocated: EditorNode[],
+  movedRootId: string,
+): EditorNode[] {
+  const subtree = collectPreorderSubtreeIds(relocated, movedRootId)
+  return relocated.map((n) => {
+    if (!subtree.has(n.id)) return n
+    if (n.sourceGltfNodeIndex === undefined || !n.sourceAssetRef) return n
+    const prevRow = before.find((x) => x.id === n.id)
+    if (!prevRow) return n
+    const prevHost = cataloguePlacementAncestorId(before, prevRow.parentId ?? null, n.sourceAssetRef)
+    const nextHost = cataloguePlacementAncestorId(relocated, n.parentId ?? null, n.sourceAssetRef)
+    if (nextHost) {
+      if (n.sourcePlacementId === undefined) return n
+      const { sourcePlacementId: _sp, ...rest } = n
+      return rest as EditorNode
+    }
+    const anchor = prevHost ?? n.sourcePlacementId
+    if (!anchor) {
+      if (n.sourcePlacementId === undefined) return n
+      const { sourcePlacementId: _sp, ...rest } = n
+      return rest as EditorNode
+    }
+    if (n.sourcePlacementId === anchor) return n
+    return { ...n, sourcePlacementId: anchor }
+  })
+}
+
+/** After duplicating a subtree, retarget mirror `sourcePlacementId` if the host placement was duplicated, or clear when implicit ancestry fixes it. */
+function patchInteriorMirrorsAfterDuplicate(
+  baseline: EditorNode[],
+  orderRows: EditorNode[],
+  copies: EditorNode[],
+  oldToNewId: Map<string, string>,
+): EditorNode[] {
+  const merged = [...baseline, ...copies]
+  return copies.map((c, ix) => {
+    const orig = orderRows[ix]
+    if (!orig) return c
+    if (c.sourceGltfNodeIndex === undefined || !c.sourceAssetRef) return c
+
+    const nextImplicit = cataloguePlacementAncestorId(merged, c.parentId ?? null, c.sourceAssetRef)
+    if (nextImplicit) {
+      if (c.sourcePlacementId === undefined) return c
+      const { sourcePlacementId: _sp, ...rest } = c
+      return rest as EditorNode
+    }
+
+    const prevHost = resolveInteriorHostPlacementId(baseline, orig)
+    const anchor =
+      prevHost && oldToNewId.has(prevHost) ? oldToNewId.get(prevHost)! : (prevHost ?? c.sourcePlacementId)
+
+    if (!anchor) {
+      if (c.sourcePlacementId === undefined) return c
+      const { sourcePlacementId: _sp, ...rest } = c
+      return rest as EditorNode
+    }
+    if (c.sourcePlacementId === anchor) return c
+    return { ...c, sourcePlacementId: anchor }
+  })
 }
 
 /**
@@ -111,6 +253,24 @@ function relocateSceneNodeAmongSiblings(
   return [...without.slice(0, insertIdx), moved, ...without.slice(insertIdx)]
 }
 
+function hierarchySortedChildren(nodes: EditorNode[], parentId: string): EditorNode[] {
+  const docIx = new Map(nodes.map((n, i) => [n.id, i]))
+  return nodes.filter((n) => n.parentId === parentId).sort((a, b) => (docIx.get(a.id) ?? 0) - (docIx.get(b.id) ?? 0))
+}
+
+/** Pre‑order authoring ids under ``rootId`` (inclusive). */
+function preorderSubtreeEditorIds(nodes: EditorNode[], rootId: string): EditorNode[] {
+  const acc: EditorNode[] = []
+  const walk = (id: string) => {
+    const n = nodes.find((x) => x.id === id)
+    if (!n) return
+    acc.push(n)
+    for (const c of hierarchySortedChildren(nodes, id)) walk(c.id)
+  }
+  walk(rootId)
+  return acc
+}
+
 function minimizeSubtreeRoots(nodes: EditorNode[], ids: string[]): string[] {
   const set = new Set(ids)
   return ids.filter((id) => {
@@ -139,6 +299,8 @@ function docToEditorState(doc: ProjectFileV2): {
     rotation: [...n.rotation] as Vec3,
     scale: [...n.scale] as Vec3,
     ...(n.assetRef ? { assetRef: n.assetRef } : {}),
+    ...(n.sourceAssetRef ? { sourceAssetRef: n.sourceAssetRef } : {}),
+    ...(typeof n.sourceGltfNodeIndex === 'number' ? { sourceGltfNodeIndex: n.sourceGltfNodeIndex } : {}),
     ...(n.visible === false ? { visible: false as const } : {}),
     ...(n.layerId ? { layerId: n.layerId } : {}),
     ...(() => {
@@ -156,6 +318,7 @@ function docToEditorState(doc: ProjectFileV2): {
     ...(a.interactionKind ? { interactionKind: a.interactionKind } : {}),
     ...(a.sourceText !== undefined ? { sourceText: a.sourceText } : {}),
     ...(a.scriptExports?.length ? { scriptExports: [...a.scriptExports] } : {}),
+    ...(a.scriptDependsOnAssetIds?.length ? { scriptDependsOnAssetIds: [...a.scriptDependsOnAssetIds] } : {}),
   }))
   return { nodes, assets, assetFolders }
 }
@@ -224,6 +387,8 @@ export type EditorContextValue = {
         | 'visible'
         | 'layerId'
         | 'assetRef'
+        | 'sourceAssetRef'
+        | 'sourceGltfNodeIndex'
       >
     >,
   ) => void
@@ -239,15 +404,22 @@ export type EditorContextValue = {
   toggleNodeHierarchyVisible: (id: string) => void
 
   /** Reparent under `parentId`; order = last sibling (Unity child drop). */
-  reparentSceneNode: (nodeId: string, newParentId: string) => void
+  reparentSceneNode: (nodeId: string, newParentId: string, opts?: ReparentOptions) => void
   /** Reorder / reparent among siblings (`insertBefore` = direct child id under `parentId`, or null = append last). */
   placeSceneNodeInHierarchy: (
     nodeId: string,
     parentId: string,
     insertBeforeSiblingId: string | null,
+    opts?: ReparentOptions,
   ) => void
+  viewportTransformSpace: TransformSpace
+  setViewportTransformSpace: (space: TransformSpace) => void
   createEmptyChild: (parentId: string) => void
   duplicateSceneNode: (nodeId: string) => void
+  /** Instantiate editor rows from the catalogue glTF default scene (requires API + `.glb`). */
+  expandGltfInterior: (placementNodeId: string, opts?: { skipUndo?: boolean }) => Promise<void>
+  /** Remove mirrored interior rows under a placement (returns to opaque catalogue merge). */
+  collapseGltfInterior: (placementNodeId: string) => void
   deleteSceneSubtreesConfirm: (rootIds: string[]) => void
   /** Direct children IDs for multi-select parity (US-SK-034). */
   selectChildrenOf: (parentId: string) => void
@@ -270,6 +442,7 @@ export type EditorContextValue = {
         | 'scriptRole'
         | 'interactionKind'
         | 'scriptExports'
+        | 'scriptDependsOnAssetIds'
         | 'sourceText'
         | 'relativePath'
       >
@@ -380,7 +553,10 @@ export function EditorProvider({
   const [assetExplorerPath, setAssetExplorerPathState] = useState<string[]>([])
   const [assetFoldersExplicit, setAssetFoldersExplicit] = useState<string[]>([])
 
+  const catalogueGlbIdSet = useMemo(() => catalogueGlbAssetIds(projectAssets), [projectAssets])
+
   const [viewportToolMode, setViewportToolModeState] = useState<ViewportToolMode>('translate')
+  const [viewportTransformSpace, setViewportTransformSpace] = useState<TransformSpace>('local')
   const [histCounts, setHistCounts] = useState({ undo: 0, redo: 0 })
 
   const baselineRef = useRef<string>(baselineKey(defaultNodes(), [], []))
@@ -400,6 +576,10 @@ export function EditorProvider({
   nodesDocRef.current = nodes
   projectAssetsDocRef.current = projectAssets
   assetFoldersDocRef.current = assetFoldersExplicit
+
+  const expandGltfInteriorRef = useRef<
+    ((placementNodeId: string, opts?: { skipUndo?: boolean }) => Promise<void>) | undefined
+  >(undefined)
 
   const syncHistoryCounts = useCallback(() => {
     setHistCounts({
@@ -703,16 +883,30 @@ export function EditorProvider({
           | 'visible'
           | 'layerId'
           | 'assetRef'
+          | 'sourceAssetRef'
+          | 'sourceGltfNodeIndex'
         >
       >,
     ) => {
+      const before = nodesDocRef.current.find((n) => n.id === id)
       if (!historyApplyingRef.current && !viewportTransformDraggingRef.current) {
         pushUndo()
       }
       setNodes((prev) => prev.map((n) => (n.id === id ? { ...n, ...patch } : n)))
       setDirty(true)
+      const becameCatalogueGlbPlacement =
+        patch.assetRef !== undefined &&
+        catalogueGlbIdSet.has(patch.assetRef) &&
+        isApiConfigured() &&
+        before !== undefined &&
+        !before.assetRef
+      if (becameCatalogueGlbPlacement) {
+        globalThis.setTimeout(() => {
+          void expandGltfInteriorRef.current?.(id, { skipUndo: true })
+        }, 0)
+      }
     },
-    [pushUndo],
+    [pushUndo, catalogueGlbIdSet],
   )
 
   const addInteractionAttachment = useCallback(
@@ -783,17 +977,33 @@ export function EditorProvider({
   }, [pushUndo])
 
   const placeSceneNodeInHierarchy = useCallback(
-    (nodeId: string, parentId: string, insertBeforeSiblingId: string | null) => {
+    (
+      nodeId: string,
+      parentId: string,
+      insertBeforeSiblingId: string | null,
+      opts?: ReparentOptions,
+    ) => {
       pushUndo()
-      setNodes((prev) => relocateSceneNodeAmongSiblings(prev, nodeId, parentId, insertBeforeSiblingId) ?? prev)
+      setNodes((prev) => {
+        if (interiorReparentForbidden(prev, nodeId, parentId, catalogueGlbIdSet)) return prev
+        const movedNode = prev.find((n) => n.id === nodeId)
+        if (!movedNode) return prev
+        const trsPatch = applyReparentTransform(movedNode, prev, parentId, opts)
+        let relocated = relocateSceneNodeAmongSiblings(prev, nodeId, parentId, insertBeforeSiblingId)
+        if (!relocated) return prev
+        if (trsPatch) {
+          relocated = relocated.map((n) => (n.id === nodeId ? { ...n, ...trsPatch } : n))
+        }
+        return patchInteriorMirrorsAfterReparent(prev, relocated, nodeId)
+      })
       setDirty(true)
     },
-    [pushUndo],
+    [pushUndo, catalogueGlbIdSet],
   )
 
   const reparentSceneNode = useCallback(
-    (nodeId: string, newParentId: string) => {
-      placeSceneNodeInHierarchy(nodeId, newParentId, null)
+    (nodeId: string, newParentId: string, opts?: ReparentOptions) => {
+      placeSceneNodeInHierarchy(nodeId, newParentId, null, opts)
     },
     [placeSceneNodeInHierarchy],
   )
@@ -819,37 +1029,138 @@ export function EditorProvider({
     setDirty(true)
   }, [pushUndo])
 
-  const duplicateSceneNode = useCallback((nodeId: string) => {
-    if (nodeId === 'root') return
-    const src = nodes.find((n) => n.id === nodeId)
-    if (!src) return
-    pushUndo()
-    const nid = uid()
-    const dup: EditorNode = {
-      id: nid,
-      name: `${src.name} Copy`,
-      parentId: src.parentId,
-      position: [...src.position],
-      rotation: [...src.rotation],
-      scale: [...src.scale],
-      ...(src.visible === false ? { visible: false as const } : {}),
-      ...(src.layerId ? { layerId: src.layerId } : {}),
-      ...(src.assetRef ? { assetRef: src.assetRef } : {}),
-      ...(src.gltfDataUrl ? { gltfDataUrl: src.gltfDataUrl } : {}),
-      ...(src.interactionAttachments?.length
-        ? {
-            interactionAttachments: src.interactionAttachments.map((a) => ({
-              ...a,
-              id: newAttachmentId(),
-              ...(a.serializedProps ? { serializedProps: { ...a.serializedProps } } : {}),
-            })),
-          }
-        : {}),
-    }
-    setNodes((prev) => [...prev, dup])
-    setSelectedNodeIdsState([nid])
-    setDirty(true)
-  }, [nodes, pushUndo])
+  const duplicateSceneNode = useCallback(
+    (nodeId: string) => {
+      if (nodeId === 'root') return
+      const srcRoot = nodes.find((n) => n.id === nodeId)
+      if (!srcRoot) return
+      pushUndo()
+
+      const order = preorderSubtreeEditorIds(nodes, nodeId)
+      const idMap = new Map<string, string>()
+      order.forEach((row) => idMap.set(row.id, uid()))
+
+      const copies: EditorNode[] = order.map((row, ix) => {
+        const nid = idMap.get(row.id)!
+        const parentRaw = row.parentId
+        let parentOut: string | null = parentRaw
+        if (parentRaw && idMap.has(parentRaw)) parentOut = idMap.get(parentRaw)!
+
+        const dup: EditorNode = {
+          id: nid,
+          name: ix === 0 ? `${row.name} Copy` : row.name,
+          parentId: parentOut,
+          position: [...row.position],
+          rotation: [...row.rotation],
+          scale: [...row.scale],
+        }
+        if (row.visible === false) dup.visible = false
+        if (row.layerId) dup.layerId = row.layerId
+        if (row.assetRef) dup.assetRef = row.assetRef
+        if (row.gltfDataUrl) dup.gltfDataUrl = row.gltfDataUrl
+        if (row.sourceAssetRef) dup.sourceAssetRef = row.sourceAssetRef
+        if (row.sourceGltfNodeIndex !== undefined) dup.sourceGltfNodeIndex = row.sourceGltfNodeIndex
+        if (row.sourcePlacementId) dup.sourcePlacementId = row.sourcePlacementId
+        if (row.interactionAttachments?.length) {
+          dup.interactionAttachments = row.interactionAttachments.map((a) => ({
+            ...a,
+            id: newAttachmentId(),
+            ...(a.serializedProps ? { serializedProps: { ...a.serializedProps } } : {}),
+          }))
+        }
+        return dup
+      })
+
+      const copiesPatched = patchInteriorMirrorsAfterDuplicate(nodes, order, copies, idMap)
+
+      setNodes((prev) => [...prev, ...copiesPatched])
+      setSelectedNodeIdsState([idMap.get(nodeId)!])
+      setHierarchyCollapsed((prev) => {
+        const next = { ...prev }
+        for (const c of copiesPatched) {
+          const px = c.parentId
+          if (px) delete next[px]
+        }
+        return next
+      })
+      setDirty(true)
+    },
+    [nodes, pushUndo],
+  )
+
+  const expandGltfInterior = useCallback(
+    async (placementNodeId: string, opts?: { skipUndo?: boolean }) => {
+      if (!isApiConfigured()) {
+        console.warn('[igltf] expanding interior hierarchy requires configured API backend')
+        return
+      }
+
+      const cur = nodesDocRef.current
+      const p = cur.find((n) => n.id === placementNodeId)
+      const catRef = p?.assetRef
+      if (!catRef || !catalogueGlbIdSet.has(catRef)) return
+      if (placementHasExpandedInterior(cur, placementNodeId, catRef)) return
+
+      let manifest: GltfInteriorManifest
+      try {
+        manifest = await fetchGltfInteriorManifest(projectIdRef.current, catRef)
+      } catch (e) {
+        console.warn('[igltf] failed to fetch interior manifest', e)
+        return
+      }
+
+      const appended = buildInteriorMirrorNodesFromManifest(placementNodeId, catRef, manifest)
+      if (!appended.length) return
+
+      if (!opts?.skipUndo) pushUndo()
+
+      setNodes((prev) => {
+        const placement = prev.find((n) => n.id === placementNodeId)
+        if (!placement?.assetRef || placement.assetRef !== catRef) return prev
+        if (placementHasExpandedInterior(prev, placementNodeId, placement.assetRef)) return prev
+        return [...prev, ...appended]
+      })
+
+      const firstMir = appended[0]?.id
+      if (firstMir) setSelectedNodeIdsState([firstMir])
+
+      setHierarchyCollapsed((prev) => {
+        const next = { ...prev }
+        delete next[placementNodeId]
+        return next
+      })
+      setDirty(true)
+    },
+    [catalogueGlbIdSet, pushUndo],
+  )
+  expandGltfInteriorRef.current = expandGltfInterior
+
+  const collapseGltfInterior = useCallback(
+    (placementNodeId: string) => {
+      const p = nodes.find((n) => n.id === placementNodeId)
+      if (!p?.assetRef) return
+      const cat = p.assetRef
+      const stack = hierarchySortedChildren(nodes, placementNodeId).map((c) => c.id)
+      const removeIds: string[] = []
+      const seen = new Set<string>()
+      while (stack.length) {
+        const id = stack.pop()!
+        if (seen.has(id)) continue
+        seen.add(id)
+        const n = nodes.find((x) => x.id === id)
+        if (!n) continue
+        if (n.sourceGltfNodeIndex !== undefined && n.sourceAssetRef === cat) removeIds.push(id)
+        stack.push(...hierarchySortedChildren(nodes, id).map((c) => c.id))
+      }
+      if (!removeIds.length) return
+      const removeSet = new Set(removeIds)
+      pushUndo()
+      setNodes((prev) => prev.filter((n) => !removeSet.has(n.id)))
+      setSelectedNodeIdsState([placementNodeId])
+      setDirty(true)
+    },
+    [nodes, pushUndo],
+  )
 
   const deleteSceneSubtreesConfirm = useCallback((rootIds: string[]) => {
     const uniq = [...new Set(rootIds)].filter((id) => id !== 'root')
@@ -897,6 +1208,9 @@ export function EditorProvider({
       prev.map((n) => {
         let next: EditorNode = n
         if (n.assetRef && assetIds.has(n.assetRef)) next = { ...next, assetRef: undefined }
+        if (n.sourceAssetRef && assetIds.has(n.sourceAssetRef)) {
+          next = { ...next, sourceAssetRef: undefined, sourceGltfNodeIndex: undefined }
+        }
         const atts = n.interactionAttachments?.filter((a) => !assetIds.has(a.scriptAssetRef))
         if (atts && atts.length !== (n.interactionAttachments?.length ?? 0)) {
           next = { ...next, interactionAttachments: atts.length ? atts : undefined }
@@ -1098,8 +1412,14 @@ export function EditorProvider({
         return nh
       })
       setDirty(true)
+      const shouldAutoExpand = isApiConfigured() && catalogueGlbIdSet.has(assetId)
+      if (shouldAutoExpand) {
+        globalThis.setTimeout(() => {
+          void expandGltfInteriorRef.current?.(id, { skipUndo: true })
+        }, 0)
+      }
     },
-    [projectAssets, nodes, pushUndo],
+    [projectAssets, nodes, pushUndo, catalogueGlbIdSet],
   )
 
   const updateProjectAsset = useCallback(
@@ -1114,6 +1434,7 @@ export function EditorProvider({
           | 'scriptRole'
           | 'interactionKind'
           | 'scriptExports'
+          | 'scriptDependsOnAssetIds'
           | 'sourceText'
           | 'relativePath'
         >
@@ -1326,8 +1647,12 @@ export function EditorProvider({
       toggleNodeHierarchyVisible,
       reparentSceneNode,
       placeSceneNodeInHierarchy,
+      viewportTransformSpace,
+      setViewportTransformSpace,
       createEmptyChild,
       duplicateSceneNode,
+      expandGltfInterior,
+      collapseGltfInterior,
       deleteSceneSubtreesConfirm,
       selectChildrenOf,
 
@@ -1389,8 +1714,12 @@ export function EditorProvider({
       toggleNodeHierarchyVisible,
       reparentSceneNode,
       placeSceneNodeInHierarchy,
+      viewportTransformSpace,
+      setViewportTransformSpace,
       createEmptyChild,
       duplicateSceneNode,
+      expandGltfInterior,
+      collapseGltfInterior,
       deleteSceneSubtreesConfirm,
       selectChildrenOf,
       addGltfNodeLocal,

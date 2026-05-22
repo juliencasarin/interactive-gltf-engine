@@ -3,10 +3,20 @@ import { OrbitControls } from '@react-three/drei'
 import { Suspense, useEffect, useState } from 'react'
 import { Link, Navigate, useParams } from 'react-router-dom'
 import { fetchPlayManifest, getApiBase, type PlayManifest } from '@/api/projectApi'
+import type { PlayRuntimeMetrics } from '@/play/PlayMetricsCollector'
 import { PlayInteractiveGltf } from '@/play/PlayInteractiveGltf'
+import { PlayMetricsFooter } from '@/play/PlayMetricsFooter'
 import './play-page.css'
 
-function PlayViewport({ manifest, projectId }: { manifest: PlayManifest; projectId: string }) {
+function PlayViewport({
+  manifest,
+  projectId,
+  onMetricsUpdate,
+}: {
+  manifest: PlayManifest
+  projectId: string
+  onMetricsUpdate: (metrics: PlayRuntimeMetrics) => void
+}) {
   return (
     <Canvas
       className="playCanvas"
@@ -17,7 +27,12 @@ function PlayViewport({ manifest, projectId }: { manifest: PlayManifest; project
       <ambientLight intensity={0.45} />
       <directionalLight position={[6, 10, 5]} intensity={0.95} />
       <Suspense fallback={null}>
-        <PlayInteractiveGltf glbUrl={manifest.glbUrl} projectId={projectId} />
+        <PlayInteractiveGltf
+          glbUrl={manifest.glbUrl}
+          projectId={projectId}
+          bundledScriptUrl={manifest.jsUrl}
+          onMetricsUpdate={onMetricsUpdate}
+        />
       </Suspense>
       <OrbitControls makeDefault enableDamping dampingFactor={0.08} />
     </Canvas>
@@ -32,11 +47,13 @@ export function PlayPage() {
   const projectId = id
   const [manifest, setManifest] = useState<PlayManifest | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [metrics, setMetrics] = useState<PlayRuntimeMetrics | null>(null)
 
   useEffect(() => {
     let cancelled = false
     setManifest(null)
     setError(null)
+    setMetrics(null)
     if (getApiBase() === '') {
       setError('VITE_API_BASE_URL is not set — cannot load the play manifest.')
       return () => {
@@ -72,8 +89,11 @@ export function PlayPage() {
         {!error && !manifest ? (
           <div className="playMessage">Loading manifest…</div>
         ) : null}
-        {manifest ? <PlayViewport manifest={manifest} projectId={projectId} /> : null}
+        {manifest ? (
+          <PlayViewport manifest={manifest} projectId={projectId} onMetricsUpdate={setMetrics} />
+        ) : null}
       </div>
+      {manifest ? <PlayMetricsFooter metrics={metrics} /> : null}
     </div>
   )
 }

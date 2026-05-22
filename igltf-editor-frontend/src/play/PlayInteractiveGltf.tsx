@@ -1,18 +1,23 @@
 import { useGLTF } from '@react-three/drei'
-import { type ThreeEvent } from '@react-three/fiber'
+import { type ThreeEvent, useFrame } from '@react-three/fiber'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
 
 import { getApiBase } from '@/api/projectApi'
 import {
-  type HandlerRegistry,
   invokeHandler,
-  loadModuleScriptIntoRegistry,
+  loadModuleScriptIntoManager,
+  registerBundledClassesOnManager,
 } from '@/scriptRuntime/loader'
-import type { IgltfTransaction, InteractiveGltfHost } from '@/scriptRuntime/igltfHost'
+import { preloadIgltfCoreModules } from '@/scriptRuntime/interactionBasesUrl'
+import type { InteractiveGltfHost } from '@/scriptRuntime/igltfHost'
+import { isIgltfTransaction } from '@/scriptRuntime/igltfTransactionUtils'
+import { ScriptInstanceManager } from '@/scriptRuntime/scriptLifecycle'
 
 import { bindIgltfNodeIndices } from './bindIgltfNodeIndices'
+import { collectProtoHandlerEntries } from './collectProtoHandlerEntries'
 import { collectProtoScriptUrls } from './collectProtoScriptUrls'
+import { PlayMetricsCollector, type PlayRuntimeMetrics } from './PlayMetricsCollector'
 import { applyIgltfTransaction, createPlayThreeHost } from './playThreeHost'
 import {
   EXT_IGLTF_UMI3D_PROTO,
@@ -23,14 +28,17 @@ import {
 type Props = {
   glbUrl: string
   projectId: string
+  /** From ``GET /play`` ``jsUrl`` — bundled ``scene.js`` when present. */
+  bundledScriptUrl?: string
+  onMetricsUpdate?: (metrics: PlayRuntimeMetrics) => void
 }
 
-export function PlayInteractiveGltf({ glbUrl, projectId }: Props) {
+export function PlayInteractiveGltf({ glbUrl, projectId, bundledScriptUrl, onMetricsUpdate }: Props) {
   const gltf = useGLTF(glbUrl)
   const clone = useMemo(() => gltf.scene.clone(true), [gltf.scene, glbUrl])
   const parserJson = (gltf as { parser: { json: GltfJson } }).parser.json
 
-  const registryRef = useRef<HandlerRegistry>({})
+  const instanceManagerRef = useRef<ScriptInstanceManager>(new ScriptInstanceManager())
   const hostRef = useRef<InteractiveGltfHost | null>(null)
 
   useLayoutEffect(() => {
@@ -56,25 +64,67 @@ export function PlayInteractiveGltf({ glbUrl, projectId }: Props) {
     let cancelled = false
     const host = createPlayThreeHost(clone)
     hostRef.current = host
-    void (async () => {
+    const applyScriptResult = (result: unknown) => {
+      if (isIgltfTransaction(result)) {
+        applyIgltfTransaction(clone, result)
+      }
+    }
+    const manager = new ScriptInstanceManager(applyScriptResult)
+    instanceManagerRef.current = manager
+
+    async function loadPerAssetScripts(): Promise<void> {
       const urls = collectProtoScriptUrls(parserJson.nodes, projectId)
-      const reg: HandlerRegistry = {}
+      for (const url of urls) {
+        const res = await fetch(url)
+        if (!res.ok) throw new Error(`Failed to fetch script ${url}: ${res.status}`)
+        const src = await res.text()
+        await loadModuleScriptIntoManager(src, host, manager)
+      }
+    }
+
+    void (async () => {
+      const handlerEntries = collectProtoHandlerEntries(parserJson.nodes)
       try {
-        for (const url of urls) {
-          const res = await fetch(url)
-          if (!res.ok) throw new Error(`Failed to fetch script ${url}: ${res.status}`)
-          const src = await res.text()
-          await loadModuleScriptIntoRegistry(src, url, host, reg)
+        await preloadIgltfCoreModules()
+        if (bundledScriptUrl) {
+          const res = await fetch(bundledScriptUrl)
+          if (!res.ok) throw new Error(`bundled script HTTP ${res.status}`)
+          const code = await res.text()
+          if (cancelled) return
+          ;(globalThis as unknown as { GLTF: InteractiveGltfHost }).GLTF = host
+          /* Indirect eval: run esbuild IIFE in global scope so ``globalThis`` handler bindings apply. */
+          ;(0, eval)(code)
+          registerBundledClassesOnManager(manager, handlerEntries)
+        } else {
+          await loadPerAssetScripts()
+        }
+        if (!cancelled) {
+          manager.bootstrap(parserJson.nodes)
         }
       } catch (e) {
-        console.error('[igltf play] interaction scripts:', e)
+        if (bundledScriptUrl) {
+          console.warn('[igltf play] scene.js failed, falling back to per-asset scripts:', e)
+          try {
+            await loadPerAssetScripts()
+            if (!cancelled) manager.bootstrap(parserJson.nodes)
+          } catch (e2) {
+            console.error('[igltf play] interaction scripts:', e2)
+          }
+        } else {
+          console.error('[igltf play] interaction scripts:', e)
+        }
       }
-      if (!cancelled) registryRef.current = reg
     })()
+
     return () => {
       cancelled = true
+      manager.destroy()
     }
-  }, [clone, parserJson, projectId, glbUrl])
+  }, [clone, parserJson, projectId, glbUrl, bundledScriptUrl])
+
+  useFrame((_state, delta) => {
+    instanceManagerRef.current.tick(delta)
+  })
 
   const onPointerDown = useCallback(
     async (e: ThreeEvent<PointerEvent>) => {
@@ -82,11 +132,13 @@ export function PlayInteractiveGltf({ glbUrl, projectId }: Props) {
       const hit = e.intersections[0]?.object
       if (!hit) return
       const host = hostRef.current
-      const registry = registryRef.current
+      const manager = instanceManagerRef.current
       if (!host) return
       ;(globalThis as unknown as { GLTF: InteractiveGltfHost }).GLTF = host
 
       let cur: THREE.Object3D | null = hit
+      /** Traverse from raycast leaf toward root — first glTF row with attachments wins. */
+
       while (cur) {
         const idx = cur.userData?.igltfNodeIndex
         if (typeof idx === 'number') {
@@ -107,20 +159,13 @@ export function PlayInteractiveGltf({ glbUrl, projectId }: Props) {
                   interactionType: 'event',
                 },
               }
-              const result = await invokeHandler(
-                registry,
+              await invokeHandler(
+                {},
                 att.scriptHandlerId,
                 invokePayload,
-                att.serializedProps,
+                undefined,
+                { attachmentId: att.attachmentId, instanceManager: manager },
               )
-              if (
-                result &&
-                typeof result === 'object' &&
-                'version' in result &&
-                (result as IgltfTransaction).version === 1
-              ) {
-                applyIgltfTransaction(clone, result as IgltfTransaction)
-              }
             }
             break
           }
@@ -132,8 +177,13 @@ export function PlayInteractiveGltf({ glbUrl, projectId }: Props) {
   )
 
   return (
-    <group onPointerDown={onPointerDown}>
-      <primitive object={clone} />
-    </group>
+    <>
+      {onMetricsUpdate ? (
+        <PlayMetricsCollector sceneRoot={clone} onUpdate={onMetricsUpdate} />
+      ) : null}
+      <group onPointerDown={onPointerDown}>
+        <primitive object={clone} />
+      </group>
+    </>
   )
 }

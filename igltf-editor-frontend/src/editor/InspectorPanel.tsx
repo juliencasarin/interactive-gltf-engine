@@ -5,7 +5,7 @@ import {
   type IntrospectedField,
 } from '@/scriptRuntime/interactionIntrospection'
 import { eulerDegreesToRad, useEditor, vec3ToEulerDegrees } from './EditorContext'
-import { isGltfAssetEntry, isScriptAssetEntry } from './assetUtils'
+import { isScriptAssetEntry } from './assetUtils'
 import { MIME_ASSET, dragOverLooksLikeAsset } from './dndTypes'
 import type { InteractionSerializedPropsMap, Vec3 } from './types'
 import './panels.css'
@@ -313,34 +313,6 @@ export function InspectorPanel() {
             />
             <span className="inspectorBoolLbl">Visible in viewport</span>
           </label>
-          {!node.assetRef && !node.gltfDataUrl ? (
-            <div
-              className="inspectorAssetDropSlot"
-              onDragOver={(e) => {
-                if (dragOverLooksLikeAsset(e.dataTransfer)) {
-                  e.preventDefault()
-                  e.dataTransfer.dropEffect = 'copy'
-                }
-              }}
-              onDrop={(e) => {
-                e.preventDefault()
-                e.stopPropagation()
-                const aid = readAssetIdFromDataTransfer(e.dataTransfer)
-                const ast = projectAssets.find((a) => a.assetId === aid)
-                if (!aid || !ast) return
-                if (isScriptAssetEntry(ast)) {
-                  addInteractionAttachment(node.id, aid)
-                  return
-                }
-                if (isGltfAssetEntry(ast)) {
-                  updateNode(node.id, { assetRef: aid })
-                }
-              }}
-            >
-              Drop project glTF here to attach (Sketch DragAssetInput — US-SK-073)
-            </div>
-          ) : null}
-
           <div className="inspectorFoldoutTitle">Transform</div>
           <VecField
             label="Position"
@@ -360,6 +332,12 @@ export function InspectorPanel() {
           {node.assetRef ? (
             <p className="inspectorHintMuted">glTF asset ({node.assetRef})</p>
           ) : null}
+          {typeof node.sourceGltfNodeIndex === 'number' ? (
+            <p className="inspectorHintMuted">
+              Interior mirror — source glTF <code>nodes[{node.sourceGltfNodeIndex}]</code> · transform deltas compose with
+              the catalogue TRS when building Play
+            </p>
+          ) : null}
           {node.gltfDataUrl ? (
             <p className="inspectorHintMuted">glTF mesh (local data URL)</p>
           ) : null}
@@ -372,8 +350,7 @@ export function InspectorPanel() {
               <p className="inspectorHintMuted">
                 Add one or more interaction scripts and tune their parameters. Each script&apos;s{' '}
                 <code>targetId</code> is the selected scene object&apos;s id (the transform it is attached to). Drop a
-                script asset anywhere in this panel (when no mesh is attached, use the dashed slot above for glTF
-                only). <strong>TODO (export):</strong> map ids to glTF / UMI3D.
+                script asset anywhere in this panel. <strong>TODO (export):</strong> map ids to glTF / UMI3D.
               </p>
               <div className="inspectorAssetDropSlot inspectorScriptDropHint">
                 Drop interaction script from Assets here or anywhere below (Transform included)

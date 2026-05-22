@@ -1,15 +1,28 @@
 # -*- mode: python ; coding: utf-8 -*-
 """Pinned PyInstaller spec — build:
+  npm ci
   uv sync --extra packaging
   uv run pyinstaller scripts/igltf-backend.spec --distpath ../igltf-editor-frontend/resources --workpath pyinstaller-build/work --clean --noconfirm
 """
 
+import platform
+import sys
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 # PyInstaller exec() namespace provides SPECPATH (this spec's directory); __file__ is not set.
 project_root = Path(SPECPATH).resolve().parent
+
+
+def _esbuild_platform_tag() -> str:
+    if sys.platform == "win32":
+        return "win32-x64"
+    if sys.platform == "darwin":
+        machine = platform.machine().lower()
+        return "darwin-arm64" if machine in ("arm64", "aarch64") else "darwin-x64"
+    machine = platform.machine().lower()
+    return "linux-arm64" if machine in ("arm64", "aarch64") else "linux-x64"
 
 block_cipher = None
 
@@ -47,6 +60,16 @@ for pkg in (
     hiddenimports += tmp[2]
 
 datas.append((project_root / "authoring_kit", "authoring_kit"))
+
+_esbuild_plat = _esbuild_platform_tag()
+_esbuild_bin_name = "esbuild.exe" if sys.platform == "win32" else "esbuild"
+_esbuild_native_dir = project_root / "node_modules" / "@esbuild" / _esbuild_plat
+if not (_esbuild_native_dir / _esbuild_bin_name).is_file():
+    raise SystemExit(
+        f"esbuild native binary missing at {_esbuild_native_dir / _esbuild_bin_name}; "
+        "run `npm ci` under igltf-editor-backend before PyInstaller",
+    )
+datas.append((str(_esbuild_native_dir), f"node_modules/@esbuild/{_esbuild_plat}"))
 
 a = Analysis(
     [str(project_root / "scripts" / "igltf_backend_entry.py")],

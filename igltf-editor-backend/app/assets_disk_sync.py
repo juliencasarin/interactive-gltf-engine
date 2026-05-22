@@ -61,6 +61,11 @@ def _scrub_scene_refs_removed_assets(doc: ProjectDocumentV2, removed_asset_ids: 
         if n2_dict.get("assetRef") and n2_dict["assetRef"] in removed_asset_ids:
             n2_dict["assetRef"] = None
             patched = True
+        if n2_dict.get("sourceAssetRef") and n2_dict["sourceAssetRef"] in removed_asset_ids:
+            n2_dict["sourceAssetRef"] = None
+            n2_dict["sourceGltfNodeIndex"] = None
+            n2_dict["sourcePlacementId"] = None
+            patched = True
         if n2_dict.get("interactionScriptAssetRef") and n2_dict["interactionScriptAssetRef"] in removed_asset_ids:
             n2_dict["interactionScriptAssetRef"] = None
             patched = True
@@ -77,6 +82,30 @@ def _scrub_scene_refs_removed_assets(doc: ProjectDocumentV2, removed_asset_ids: 
             nodes.append(n)
 
     doc.scene.nodes = nodes
+    return mutated
+
+
+def _scrub_script_dep_refs_removed_assets(doc: ProjectDocumentV2, removed_asset_ids: set[str]) -> bool:
+    """Drop removed asset ids from ``scriptDependsOnAssetIds`` on remaining script rows."""
+    if not removed_asset_ids:
+        return False
+    mutated = False
+    new_assets: list[ProjectAsset] = []
+    for a in doc.assets:
+        deps = a.scriptDependsOnAssetIds
+        if not deps:
+            new_assets.append(a)
+            continue
+        kept = [x for x in deps if x not in removed_asset_ids]
+        if len(kept) != len(deps):
+            mutated = True
+            patch = a.model_dump()
+            patch["scriptDependsOnAssetIds"] = kept or None
+            new_assets.append(ProjectAsset.model_validate(patch))
+        else:
+            new_assets.append(a)
+    if mutated:
+        doc.assets = new_assets
     return mutated
 
 
@@ -154,6 +183,7 @@ def _sync_assets_from_disk_inner(project_id: str) -> list[dict[str, Any]]:
         doc.assets = [a for a in doc.assets if a.assetId not in removed_ids]
         needs_write = True
         _scrub_scene_refs_removed_assets(doc, removed_ids)
+        _scrub_script_dep_refs_removed_assets(doc, removed_ids)
 
     ref_paths = {_norm_rel(a.relativePath) for a in doc.assets}
     known_asset_ids = {a.assetId for a in doc.assets}

@@ -140,6 +140,34 @@ export async function fetchAssetSource(projectId: string, assetId: string): Prom
   return res.text()
 }
 
+export type GltfInteriorManifestRow = {
+  index: number
+  parentIndex: number | null
+  name: string
+  hasMesh: boolean
+  hasSkin: boolean
+}
+
+export type GltfInteriorManifest = {
+  defaultSceneRoots: number[]
+  preorderIndices: number[]
+  nodes: GltfInteriorManifestRow[]
+  assetId?: string
+  relativePath?: string
+}
+
+export async function fetchGltfInteriorManifest(
+  projectId: string,
+  assetId: string,
+): Promise<GltfInteriorManifest> {
+  const base = getApiBase()
+  const res = await fetch(
+    `${base}/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/gltf-interior-manifest`,
+  )
+  if (!res.ok) throw new Error((await res.text()) || `GET gltf-interior-manifest ${res.status}`)
+  return res.json() as Promise<GltfInteriorManifest>
+}
+
 export async function putAssetSource(
   projectId: string,
   assetId: string,

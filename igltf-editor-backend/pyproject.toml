@@ -33,3 +33,7 @@ packages = ["app"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "authoring_kit" = "authoring_kit"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

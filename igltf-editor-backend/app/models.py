@@ -24,6 +24,10 @@ class ProjectAsset(BaseModel):
     scriptRole: Literal["interaction", "behaviour"] | None = None
     interactionKind: str | None = None
     scriptExports: list[str] | None = None
+    scriptDependsOnAssetIds: list[str] | None = Field(
+        default=None,
+        description="Explicit bundle deps: assetIds of other script assets (topological order).",
+    )
 
     model_config = {"extra": "ignore"}
 
@@ -35,7 +39,25 @@ class SceneNode(BaseModel):
     position: list[float]
     rotation: list[float]
     scale: list[float]
-    assetRef: str | None = None
+    assetRef: str | None = Field(
+        default=None,
+        description="Catalog .glb asset id on placement rows; interior mirrors omit this.",
+    )
+    sourceAssetRef: str | None = Field(
+        default=None,
+        description="Catalog .glb asset id for expanded interior mirrors (matches placement assetRef).",
+    )
+    sourceGltfNodeIndex: int | None = Field(
+        default=None,
+        description="glTF nodes[] index in the catalogue file for this mirror row.",
+    )
+    sourcePlacementId: str | None = Field(
+        default=None,
+        description=(
+            "When a mirror row is reparented outside the catalogue placement subtree, "
+            "the stable host placement scene node id (assetRef matches sourceAssetRef)."
+        ),
+    )
     visible: bool | None = None
     layerId: str | None = None
     interactionAttachments: list[InteractionScriptAttachment] | None = None

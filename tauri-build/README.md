@@ -20,8 +20,8 @@ From the **`interactive-gltf-engine` repo root**:
 
 This sequence:
 
-1. `uv sync --extra packaging` + **PyInstaller** `scripts\igltf-backend.spec` → outputs the **onedir** backend under `igltf-editor-frontend\resources\igltf-backend\`.
-2. `npm ci` + `npm run tauri build` → release binary + **`nsis`** installer when NSIS is installed.
+1. `npm ci` (esbuild for **`build/scene.js`**) + `uv sync --extra packaging` + **PyInstaller** `scripts\igltf-backend.spec` → outputs the **onedir** backend under `igltf-editor-frontend\resources\igltf-backend\` (includes bundled **esbuild**).
+2. `npm ci`, **clean** `igltf-editor-frontend\src-tauri\target\release` (drops stale binaries such as a previous `app.exe`), then `npm run tauri build` → **`igltf-editor.exe`** + **`nsis`** installer when NSIS is installed.
 
 Typical outputs include an unpacked `release` directory and a **`setup.exe`** (use the installer as the user-facing download).
 

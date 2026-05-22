@@ -12,6 +12,8 @@ import {
   type RefObject,
 } from 'react'
 import { useEditor } from './EditorContext'
+import { placementHasExpandedInterior } from './interiorPlacementContext'
+import { isApiConfigured } from '@/api/projectApi'
 import {
   MIME_ASSET,
   MIME_HIERARCHY_NODE,
@@ -148,6 +150,7 @@ const HierarchyReorderLane = memo(function HierarchyReorderLane({
 export function HierarchyPanel() {
   const {
     nodes,
+    projectAssets,
     selectionId,
     selectedNodeIds,
     panelFocus,
@@ -166,6 +169,8 @@ export function HierarchyPanel() {
     placeSceneNodeInHierarchy,
     createEmptyChild,
     duplicateSceneNode,
+    expandGltfInterior,
+    collapseGltfInterior,
     deleteSceneSubtreesConfirm,
     selectChildrenOf,
     addSceneNodeFromAsset,
@@ -668,6 +673,49 @@ export function HierarchyPanel() {
           >
             Isolate / unisolate subtree
           </button>
+          {menu.nodeId !== 'root'
+            ? (() => {
+                const mn = nodes.find((x) => x.id === menu.nodeId)
+                const glbAid = mn?.assetRef
+                const rel = glbAid ? projectAssets.find((a) => a.assetId === glbAid)?.relativePath ?? '' : ''
+                const glbAsset = !!glbAid && rel.toLowerCase().endsWith('.glb')
+                const expanded =
+                  !!glbAid && !!mn && placementHasExpandedInterior(nodes, menu.nodeId, glbAid)
+                const api = isApiConfigured()
+                const canExpand = !!(glbAsset && mn && api && glbAid && !expanded)
+                const canCollapse = !!(glbAsset && expanded)
+                return (
+                  <>
+                    {canExpand ? (
+                      <button
+                        type="button"
+                        className="contextMenuItem"
+                        role="menuitem"
+                        onClick={() => {
+                          closeMenu()
+                          void expandGltfInterior(menu.nodeId)
+                        }}
+                      >
+                        Expand GLB hierarchy…
+                      </button>
+                    ) : null}
+                    {canCollapse ? (
+                      <button
+                        type="button"
+                        className="contextMenuItem"
+                        role="menuitem"
+                        onClick={() => {
+                          collapseGltfInterior(menu.nodeId)
+                          closeMenu()
+                        }}
+                      >
+                        Collapse GLB hierarchy
+                      </button>
+                    ) : null}
+                  </>
+                )
+              })()
+            : null}
           {menu.nodeId !== 'root' ? (
             <>
               <button

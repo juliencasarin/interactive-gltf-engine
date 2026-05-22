@@ -10,8 +10,10 @@ import type {
   IgltfSceneObjectHandle,
   InteractiveGltfHost,
 } from './igltfHost'
-import { rewriteInteractionBasesImportsForBlobModule } from './interactionBasesUrl'
+import { normalizeIgltfTransaction } from './igltfTransactionUtils'
+import { rewriteIgltfCoreImportsForBlobModule } from './interactionBasesUrl'
 import { interactionMainMethodForKind, type InteractionTemplateKind } from './interactionScriptTemplates'
+import { ScriptInstanceManager } from './scriptLifecycle'
 
 export type ScriptHandler = (
   payload: Record<string, unknown>,
@@ -21,7 +23,7 @@ export type ScriptHandler = (
 export type HandlerRegistry = Record<string, ScriptHandler>
 
 /** `export class` detection without relying on non-portable prototype semantics. */
-function isClassExport(fn: unknown): fn is new () => Record<string, unknown> {
+export function isClassExport(fn: unknown): fn is new () => Record<string, unknown> {
   return typeof fn === 'function' && /^class\s/.test(Function.prototype.toString.call(fn))
 }
 
@@ -42,6 +44,55 @@ function createTransactionBuilder(): IgltfTransactionBuilder {
         kind: 'transform.setLocalEulerDegrees',
         entityId,
         eulerDegrees: { x: eulerDegrees.x, y: eulerDegrees.y, z: eulerDegrees.z },
+      })
+      return self
+    },
+    addSetLocalScale(entityId, scale) {
+      operations.push({
+        kind: 'transform.setLocalScale',
+        entityId,
+        scale: { x: scale.x, y: scale.y, z: scale.z },
+      })
+      return self
+    },
+    addSetLocalQuaternion(entityId, quaternion) {
+      operations.push({
+        kind: 'transform.setLocalQuaternion',
+        entityId,
+        quaternion: { x: quaternion.x, y: quaternion.y, z: quaternion.z, w: quaternion.w },
+      })
+      return self
+    },
+    addSetParent(entityId, parentId) {
+      operations.push({ kind: 'hierarchy.setParent', entityId, parentId })
+      return self
+    },
+    addTranslate(entityId, delta, space) {
+      operations.push({
+        kind: 'transform.translate',
+        entityId,
+        delta: { x: delta.x, y: delta.y, z: delta.z },
+        ...(space ? { space } : {}),
+      })
+      return self
+    },
+    addRotate(entityId, eulerDegrees, space) {
+      operations.push({
+        kind: 'transform.rotate',
+        entityId,
+        eulerDegrees: { x: eulerDegrees.x, y: eulerDegrees.y, z: eulerDegrees.z },
+        ...(space ? { space } : {}),
+      })
+      return self
+    },
+    addRotateAround(entityId, axis, angleDeg, opts) {
+      operations.push({
+        kind: 'transform.rotateAround',
+        entityId,
+        axis: { x: axis.x, y: axis.y, z: axis.z },
+        angleDeg,
+        ...(opts?.pivot ? { pivot: { x: opts.pivot.x, y: opts.pivot.y, z: opts.pivot.z } } : {}),
+        ...(opts?.space ? { space: opts.space } : {}),
       })
       return self
     },
@@ -101,6 +152,10 @@ export function createStubInteractiveGltfHost(): InteractiveGltfHost {
           umi3dId: id,
           getLocalPosition: () => zero,
           getWorldPosition: () => zero,
+          getLocalRotation: () => ({ x: 0, y: 0, z: 0, w: 1 }),
+          getWorldRotation: () => ({ x: 0, y: 0, z: 0, w: 1 }),
+          getLocalScale: () => ({ x: 1, y: 1, z: 1 }),
+          getWorldScale: () => ({ x: 1, y: 1, z: 1 }),
           translateLocal: () => {
             console.info('[igltf preview GLTF] translateLocal', id)
           },
@@ -110,11 +165,45 @@ export function createStubInteractiveGltfHost(): InteractiveGltfHost {
       return h
     },
     createTransaction: () => createTransactionBuilder(),
+    executeTransaction(transaction) {
+      const tx = normalizeIgltfTransaction(transaction)
+      if (!tx) {
+        console.warn('[igltf preview GLTF] executeTransaction: invalid transaction')
+        return false
+      }
+      console.info('[igltf preview GLTF] executeTransaction', tx.operations.length, 'operation(s)')
+      return true
+    },
   }
 }
 
 export type ScriptModuleMeta = {
   interactionKind?: InteractionTemplateKind
+}
+
+/** After a classic/IIFE bundle ran (e.g. ``scene.js``), map globals into the handler registry. */
+export function registerBundledExportsFromGlobalThis(
+  registry: HandlerRegistry,
+  entries: { name: string; interactionKind?: InteractionTemplateKind }[],
+): void {
+  for (const { name, interactionKind } of entries) {
+    const v = (globalThis as unknown as Record<string, unknown>)[name]
+    if (typeof v !== 'function') continue
+    if (isClassExport(v)) {
+      registry[name] = wrapClassExport(v, interactionKind)
+    } else {
+      const fn = v as (p: Record<string, unknown>) => unknown
+      registry[name] = (payload) => fn(payload)
+    }
+  }
+}
+
+/** Register bundled class exports on a play-mode lifecycle manager (persistent instances). */
+export function registerBundledClassesOnManager(
+  manager: ScriptInstanceManager,
+  entries: { name: string; interactionKind?: InteractionTemplateKind }[],
+): void {
+  manager.registerBundledFromGlobalThis(entries, isClassExport)
 }
 
 /** Dynamic import of ES module source; collects class and function exports. */
@@ -125,7 +214,7 @@ export async function loadModuleScriptIntoRegistry(
   registry: HandlerRegistry,
   meta?: ScriptModuleMeta,
 ): Promise<void> {
-  const resolved = rewriteInteractionBasesImportsForBlobModule(source)
+  const resolved = rewriteIgltfCoreImportsForBlobModule(source)
   const blob = new Blob([resolved], { type: 'text/javascript' })
   const url = URL.createObjectURL(blob)
   ;(globalThis as unknown as { GLTF: InteractiveGltfHost }).GLTF = host
@@ -142,6 +231,25 @@ export async function loadModuleScriptIntoRegistry(
         registry[key] = (payload) => fn(payload)
       }
     }
+  } finally {
+    URL.revokeObjectURL(url)
+  }
+}
+
+/** Load ES module exports into a play-mode lifecycle manager (class exports only). */
+export async function loadModuleScriptIntoManager(
+  source: string,
+  host: InteractiveGltfHost,
+  manager: ScriptInstanceManager,
+  meta?: ScriptModuleMeta,
+): Promise<void> {
+  const resolved = rewriteIgltfCoreImportsForBlobModule(source)
+  const blob = new Blob([resolved], { type: 'text/javascript' })
+  const url = URL.createObjectURL(blob)
+  ;(globalThis as unknown as { GLTF: InteractiveGltfHost }).GLTF = host
+  try {
+    const mod = await import(/* @vite-ignore */ url)
+    manager.registerFromModule(mod as Record<string, unknown>, meta, isClassExport)
   } finally {
     URL.revokeObjectURL(url)
   }
@@ -168,7 +276,11 @@ export async function invokeHandler(
   name: string,
   payload: Record<string, unknown>,
   instanceProps?: Record<string, unknown>,
+  options?: { attachmentId?: string; instanceManager?: ScriptInstanceManager },
 ): Promise<unknown> {
+  if (options?.attachmentId && options.instanceManager) {
+    return options.instanceManager.invokeOnAttachment(options.attachmentId, payload)
+  }
   const fn = registry[name]
   if (!fn) {
     console.warn('[igltf preview] no handler', name)

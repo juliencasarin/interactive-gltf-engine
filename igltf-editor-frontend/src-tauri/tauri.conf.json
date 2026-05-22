@@ -1,6 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "igltf-editor",
+  "mainBinaryName": "igltf-editor",
   "version": "0.1.0",
   "identifier": "com.interactivegltf.editor",
   "build": {
@@ -12,7 +13,7 @@
   "app": {
     "windows": [
       {
-        "title": "interactive glTF Editor",
+        "title": "igltf-editor",
         "width": 1280,
         "height": 800,
         "resizable": true,

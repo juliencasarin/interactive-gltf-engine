@@ -75,6 +75,11 @@ function editorNodeToSceneNodeV2(n: EditorNode): SceneNodeV2 {
     scale: n.scale,
   }
   if (n.assetRef) out.assetRef = n.assetRef
+  if (n.sourceAssetRef) out.sourceAssetRef = n.sourceAssetRef
+  if (typeof n.sourceGltfNodeIndex === 'number' && Number.isFinite(n.sourceGltfNodeIndex)) {
+    out.sourceGltfNodeIndex = Math.trunc(n.sourceGltfNodeIndex)
+  }
+  if (n.sourcePlacementId) out.sourcePlacementId = n.sourcePlacementId
   if (n.visible === false) out.visible = false
   if (n.layerId) out.layerId = n.layerId
   if (n.interactionAttachments?.length) {
@@ -138,6 +143,7 @@ export function toProjectFileV2(
       ...(a.interactionKind ? { interactionKind: a.interactionKind } : {}),
       ...(a.sourceText !== undefined && a.sourceText !== '' ? { sourceText: a.sourceText } : {}),
       ...(a.scriptExports?.length ? { scriptExports: [...a.scriptExports] } : {}),
+      ...(a.scriptDependsOnAssetIds?.length ? { scriptDependsOnAssetIds: [...a.scriptDependsOnAssetIds] } : {}),
     })),
   }
   const af = [...new Set((assetFoldersExplicit ?? []).map(normalizeLogicalFolder).filter(Boolean))].sort()
@@ -172,6 +178,15 @@ function editorNodeFromSceneLike(raw: Record<string, unknown>, vecs: {
     rotation: vecs.rotation,
     scale: vecs.scale,
     ...(typeof raw.assetRef === 'string' ? { assetRef: raw.assetRef } : {}),
+    ...(typeof raw.sourceAssetRef === 'string' && raw.sourceAssetRef
+      ? { sourceAssetRef: raw.sourceAssetRef }
+      : {}),
+    ...(typeof raw.sourceGltfNodeIndex === 'number' && Number.isFinite(raw.sourceGltfNodeIndex)
+      ? { sourceGltfNodeIndex: raw.sourceGltfNodeIndex as number }
+      : {}),
+    ...(typeof raw.sourcePlacementId === 'string' && raw.sourcePlacementId
+      ? { sourcePlacementId: raw.sourcePlacementId }
+      : {}),
     ...(raw.visible === false ? { visible: false as const } : {}),
     ...(typeof raw.layerId === 'string' ? { layerId: raw.layerId } : {}),
     ...(attachments?.length ? { interactionAttachments: attachments } : {}),

@@ -1,0 +1,7 @@
+{
+  "private": true,
+  "description": "esbuild for igltf-editor-backend scene.js bundle (run npm install here)",
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
+}

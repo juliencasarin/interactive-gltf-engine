@@ -1,5 +1,5 @@
 import * as monaco from 'monaco-editor'
-import { INTERACTION_BASES_IMPORT_PATH } from './interactionBasesUrl'
+import { GLTF_SCRIPT_IMPORT_PATH, INTERACTION_BASES_IMPORT_PATH } from './interactionBasesUrl'
 
 // Vite worker modules for Monaco
 import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker'
@@ -40,7 +40,7 @@ export function registerIgltfHostExtraLibs(): void {
   })
 }
 
-/** Default script asset: import core base + ES class + optional `onLoaded` / handler method pattern. */
+/** Default interaction script: kind base → Interaction → GlTFScript. */
 export const DEFAULT_SCRIPT_TEMPLATE = `import { EventInteraction } from '${INTERACTION_BASES_IMPORT_PATH}'
 
 export class ExampleInteraction extends EventInteraction {
@@ -49,7 +49,15 @@ export class ExampleInteraction extends EventInteraction {
   }
 
   onLoaded() {
-    // TODO: runs when behaviour is created (preview / runtime).
+    // TODO: runs once when the script instance is attached in Play.
+  }
+
+  onUpdate(delta) {
+    // TODO: optional per-frame hook (delta in seconds).
+  }
+
+  onDelete() {
+    // TODO: optional teardown when the scene unmounts.
   }
 
   onEvent(payload) {
@@ -58,6 +66,28 @@ export class ExampleInteraction extends EventInteraction {
     }
     void payload
     return undefined
+  }
+}
+`
+
+/** Behaviour script (scriptRole: behaviour) — extends GlTFScript directly. */
+export const DEFAULT_BEHAVIOUR_SCRIPT_TEMPLATE = `import { GlTFScript } from '${GLTF_SCRIPT_IMPORT_PATH}'
+
+export class ExampleBehaviour extends GlTFScript {
+  constructor() {
+    super()
+  }
+
+  onLoaded() {
+    // TODO: runs once when attached to a scene node in Play.
+  }
+
+  onUpdate(delta) {
+    // TODO: optional per-frame hook (delta in seconds).
+  }
+
+  onDelete() {
+    // TODO: optional teardown when the scene unmounts.
   }
 }
 `

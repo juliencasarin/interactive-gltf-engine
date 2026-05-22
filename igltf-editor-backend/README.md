@@ -71,7 +71,7 @@ The editor persists via **`PUT /document`**, which **deletes orphan top-level fi
 
 ## Play manifest
 
-- **`GET /play/{project_id}`** resolves **`glbUrl`** from **`build/scene.glb`**, falling back to legacy **`test.glb`** next to **`project.json`**. **`jsUrl`** is optional (`build/play.js`, `build/scene.js`, or legacy root **`test.js`**).
+- **`GET /play/{project_id}`** resolves **`glbUrl`** from **`build/scene.glb`**, falling back to legacy **`test.glb`** next to **`project.json`**. **`jsUrl`** is optional, in this order: **`build/scene.js`**, **`build/play.js`**, or legacy root **`test.js`**.
 
   ```json
   {
@@ -103,7 +103,11 @@ HTTP API contracts and on-disk layout **must not contradict** interactive-gltf e
 
 Authoring persistence uses **`project.json`** + **`assets/`** + **`_staging/`** per project id: uploads go to **`POST …/assets/stage`**; **`PUT /document`** promotes staged files, removes orphan **`assets/`** files, and returns the persisted **`document`**. Static serving under **`/files/{id}/…`** includes those paths. Full breakdown: **[`../docs/project-json-phase-plan.md`](../docs/project-json-phase-plan.md)**.
 
-The **Save API** for final **`play.js`** / **`test.js`** bundling remains a **later** milestone; **`POST …/build-play-glb`** writes **`build/scene.glb`** from the persisted **`project.json`** + catalog **`.glb`** (step 1 — geometry only, **pygltflib**).
+The **Save API** for ad-hoc **`play.js`** / root **`test.js`** remains optional; **`POST …/build-play-glb`** writes **`build/scene.glb`** (merged catalog geometry) **and**, when the project catalog includes script files under **`assets/`**, runs **esbuild** to emit **`build/scene.js`**. The glTF JSON declares **`extensionsUsed`** entry **`EXT_interactive_gltf`** with a **`scripts`** array pointing at **`scene.js`** (`kind: classic`). Topological order follows **`scriptDependsOnAssetIds`** on each **`assets[]`** script row.
+
+**JavaScript bundle toolchain:** run **`npm install`** once under **`igltf-editor-backend/`** so **`esbuild`** is available, or set **`ESBUILD_BINARY`** to an **`esbuild`** executable on **`PATH`**. Imports under **`/igltf-core/*`** are treated as **external** at bundle time (the viewer supplies those modules).
+
+Desktop **PyInstaller** bundles still need a documented strategy for shipping **Node** or a pinned **esbuild** binary (follow-up).
 
 ### Run and configure
 
@@ -111,7 +115,7 @@ The **Save API** for final **`play.js`** / **`test.js`** bundling remains a **la
 
 - **Env:** **`STORAGE_ROOT`** or **`IGLTF_APP_DATA_DIR`** — app-state dir (**`projects.json`**, slug workspaces; default `./data`), **`PUBLIC_BASE_URL`** (default `http://127.0.0.1:8000`), **`CORS_ORIGINS`** (comma-separated).
 
-- **API:** `GET`/`PUT /projects/{id}/document` (**PUT** response: `{"status":"ok","document":{…}}`), `POST /projects/{id}/assets/stage`, **`POST /projects/{id}/build-play-glb`** (writes **`build/scene.glb`**), **`GET /projects/{id}/dev-local-path`**, **`POST /projects/{id}/open-in-ide`** (`preset=cursor|vscode|jetbrains`, runs the IDE CLI on the API host for local desktop), **`GET /files/{id}/…`** (path-serving), **`GET /studio/projects`**, **`GET /health`**.
+- **API:** `GET`/`PUT /projects/{id}/document` (**PUT** response: `{"status":"ok","document":{…}}`), `POST /projects/{id}/assets/stage`, **`POST /projects/{id}/build-play-glb`** (writes **`build/scene.glb`** and optional **`build/scene.js`**; response includes **`jsRelativePath`** when **`scene.js`** exists), **`GET /projects/{id}/dev-local-path`**, **`POST /projects/{id}/open-in-ide`** (`preset=cursor|vscode|jetbrains`, runs the IDE CLI on the API host for local desktop), **`GET /files/{id}/…`** (path-serving), **`GET /studio/projects`**, **`GET /health`**.
 
 - **Frontend:** set `VITE_API_BASE_URL` (see [`../igltf-editor-frontend/.env.example`](../igltf-editor-frontend/.env.example)).
 

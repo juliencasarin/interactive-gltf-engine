@@ -5,63 +5,55 @@
  * Runtime injects global GLTF before your module loads.
  */
 
-export class EventInteraction {
-  constructor() {
-    this.targetId = ''
+import { GlTFScript } from './gltf-script.js'
+
+export { GlTFScript } from './gltf-script.js'
+
+export class Interaction extends GlTFScript {
+  handleInteraction(_payload) {
+    return undefined
   }
+}
 
-  onLoaded() {}
-
+export class EventInteraction extends Interaction {
   onEvent(_payload) {
     return undefined
   }
 }
 
-export class LinkInteraction {
+export class LinkInteraction extends Interaction {
   constructor() {
-    this.targetId = ''
+    super()
     this.href = ''
   }
-
-  onLoaded() {}
 
   onLink(_payload) {
     return undefined
   }
 }
 
-export class FormInteraction {
+export class FormInteraction extends Interaction {
   constructor() {
-    this.targetId = ''
+    super()
     this.formId = ''
   }
-
-  onLoaded() {}
 
   onForm(_payload) {
     return undefined
   }
 }
 
-export class ManipulationInteraction {
-  constructor() {
-    this.targetId = ''
-  }
-
-  onLoaded() {}
-
+export class ManipulationInteraction extends Interaction {
   onManipulation(_payload) {
     return undefined
   }
 }
 
-export class DrawingInteraction {
+export class DrawingInteraction extends Interaction {
   constructor() {
-    this.targetId = ''
+    super()
     this.strokeId = ''
   }
-
-  onLoaded() {}
 
   onDrawing(_payload) {
     return undefined

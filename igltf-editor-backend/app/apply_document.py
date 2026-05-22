@@ -145,6 +145,8 @@ def apply_and_persist_project(project_id: str, body: ProjectDocumentV2) -> Proje
     for n in body.scene.nodes:
         if n.assetRef:
             refs.add(n.assetRef)
+        if n.sourceAssetRef:
+            refs.add(n.sourceAssetRef)
         for att in n.interactionAttachments or []:
             refs.add(att.scriptAssetRef)
     cats = {a.assetId for a in body.assets}

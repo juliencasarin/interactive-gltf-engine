@@ -10,6 +10,8 @@ from fastapi import HTTPException
 from pygltflib import GLTF2, Node, Scene
 
 from app.gltf_merge import merge_embedded_glb_into
+from app.build_scene_js import write_scene_js_bundle
+from app.interactive_gltf_ext import EXT_INTERACTIVE_GLTF, interactive_gltf_root_extension_value
 from app.igltf_umi3d_proto import (
     EXT_IGLTF_UMI3D_PROTO,
     interaction_kind_str,
@@ -225,6 +227,260 @@ def _build_placed_catalog_nodes(
     return chunk
 
 
+def _sorted_scene_child_ids(
+    scene_nodes: list[SceneNode], parent_id: str, doc_order: dict[str, int]
+) -> list[str]:
+    ch = [n.id for n in scene_nodes if n.parentId == parent_id]
+    return sorted(ch, key=lambda i: doc_order.get(i, 0))
+
+
+def _preorder_editor_subtree(scene_nodes: list[SceneNode], root_id: str, doc_order: dict[str, int]) -> list[str]:
+    out: list[str] = []
+
+    def walk(eid: str) -> None:
+        out.append(eid)
+        for cid in _sorted_scene_child_ids(scene_nodes, eid, doc_order):
+            walk(cid)
+
+    walk(root_id)
+    return out
+
+
+def _catalogue_placement_ancestor_id(
+    nodes_by_id: dict[str, SceneNode], start_parent_id: str | None, catalogue_asset_id: str
+) -> str | None:
+    """First ancestor row (walking parentId) with ``assetRef == catalogue_asset_id``."""
+    cur = start_parent_id
+    while cur:
+        row = nodes_by_id.get(cur)
+        if row is None:
+            return None
+        if row.assetRef == catalogue_asset_id:
+            return row.id
+        cur = row.parentId
+    return None
+
+
+def _mirror_host_placement_id(sn: SceneNode, nodes_by_id: dict[str, SceneNode]) -> str | None:
+    """Stable catalogue placement owning mesh data for a mirror row (explicit or implicit upward walk)."""
+
+    idx = sn.sourceGltfNodeIndex
+    if idx is None or sn.sourceAssetRef is None:
+        return None
+    if sn.sourcePlacementId:
+        p = nodes_by_id.get(sn.sourcePlacementId)
+        if p is not None and p.assetRef == sn.sourceAssetRef:
+            return p.id
+    return _catalogue_placement_ancestor_id(nodes_by_id, sn.parentId, sn.sourceAssetRef)
+
+
+def _list_interior_mirrors_hosted_by(
+    scene_nodes: list[SceneNode],
+    placement_id: str,
+    catalog_asset_ref: str,
+    nodes_by_id: dict[str, SceneNode],
+) -> list[SceneNode]:
+    out: list[SceneNode] = []
+    doc_ix = {n.id: i for i, n in enumerate(scene_nodes)}
+    for n in scene_nodes:
+        if n.sourceAssetRef != catalog_asset_ref:
+            continue
+        if n.sourceGltfNodeIndex is None:
+            continue
+        if _mirror_host_placement_id(n, nodes_by_id) == placement_id:
+            out.append(n)
+    out.sort(key=lambda x: (doc_ix.get(x.id, 1_000_000_000), x.id))
+    return out
+
+
+def _placement_has_expanded_interior(
+    scene_nodes: list[SceneNode],
+    placement_id: str,
+    placement_asset_ref: str,
+    nodes_by_id: dict[str, SceneNode],
+) -> bool:
+    """True when at least one authored mirror resolves to ``placement_id``."""
+
+    return bool(
+        _list_interior_mirrors_hosted_by(scene_nodes, placement_id, placement_asset_ref, nodes_by_id),
+    )
+
+
+def _validate_expanded_interior(
+    *,
+    placement: SceneNode,
+    scene_nodes: list[SceneNode],
+    src_label: str,
+    src: GLTF2,
+    nodes_by_id: dict[str, SceneNode],
+) -> None:
+    """Ensure mirrored rows resolve to ``placement.assetRef`` and reference valid static nodes."""
+
+    assert placement.assetRef is not None
+    cat = placement.assetRef
+    mirrors = _list_interior_mirrors_hosted_by(scene_nodes, placement.id, cat, nodes_by_id)
+    nn = len(src.nodes or [])
+    for n in mirrors:
+        idx = n.sourceGltfNodeIndex
+        if idx is None:
+            continue
+        if n.sourceAssetRef is None or n.sourceAssetRef != cat:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{src_label}: expanded node {n.name!r} must set sourceAssetRef to placement catalogue",
+            )
+        if idx < 0 or idx >= nn:
+            raise HTTPException(status_code=400, detail=f"{src_label}: invalid sourceGltfNodeIndex on {n.name!r}")
+        gn = src.nodes[idx]
+        if gn.skin is not None:
+            raise HTTPException(status_code=400, detail=f"{src_label}: skin not supported on interior node index {idx}")
+
+
+def _gltf_node_local_mat4_cm(sn: Node) -> list[float]:
+    if sn.matrix is not None and len(sn.matrix) == 16:
+        return [float(x) for x in sn.matrix]
+    t = (
+        [float(sn.translation[i]) for i in range(3)]
+        if sn.translation is not None
+        else [0.0, 0.0, 0.0]
+    )
+    r_default = [0.0, 0.0, 0.0, 1.0]
+    rvals = (
+        [float(sn.rotation[i]) for i in range(4)] if sn.rotation is not None else r_default.copy()
+    )
+    svals = ([float(sn.scale[i]) for i in range(3)] if sn.scale is not None else [1.0, 1.0, 1.0])
+    return _trs_to_mat4_cm(t, rvals, svals)
+
+
+def _editor_delta_mat4_cm(enode: SceneNode) -> list[float]:
+    t = enode.position
+    q = _euler_xyz_three_js_to_quaternion(float(enode.rotation[0]), float(enode.rotation[1]), float(enode.rotation[2]))
+    return _trs_to_mat4_cm(t, q, enode.scale)
+
+
+def _emit_interior_mirror_clone_node(
+    enf: SceneNode,
+    *,
+    src: GLTF2,
+    mesh_base: int,
+    child_gl_indices: list[int],
+) -> Node:
+    idx = enf.sourceGltfNodeIndex
+    assert idx is not None and idx >= 0
+    si = int(idx)
+    sn = src.nodes[si]
+    m_src = _gltf_node_local_mat4_cm(sn)
+    m_delta = _editor_delta_mat4_cm(enf)
+    m_fin = _mat4_mul_cm(m_delta, m_src)
+    nm = enf.name or (sn.name or f"node_{si}")
+    out_n = Node(matrix=[float(x) for x in m_fin], children=child_gl_indices, name=str(nm))
+    if sn.mesh is not None:
+        out_n.mesh = int(sn.mesh) + mesh_base
+    return out_n
+
+
+def _extend_needed_ids_for_interior_mirrors(
+    scene_nodes: list[SceneNode],
+    needed_ids: set[str],
+    *,
+    nodes_by_id: dict[str, SceneNode],
+    glb_paths_by_asset: dict[str, Path],
+) -> None:
+    """Pull detached mirror chains into ``needed_ids`` until they intersect an existing authoring row."""
+
+    for n in scene_nodes:
+        if n.sourceGltfNodeIndex is None or not n.sourceAssetRef:
+            continue
+        hid = _mirror_host_placement_id(n, nodes_by_id)
+        if hid is None:
+            continue
+        hp = nodes_by_id.get(hid)
+        if hp is None or hp.assetRef is None or hp.assetRef not in glb_paths_by_asset:
+            continue
+        if not _placement_has_expanded_interior(scene_nodes, hid, hp.assetRef, nodes_by_id):
+            continue
+        cur: str | None = n.id
+        while cur is not None:
+            if cur in needed_ids:
+                break
+            needed_ids.add(cur)
+            cur = nodes_by_id[cur].parentId
+
+
+def _build_expanded_placement_nodes(
+    *,
+    scene_nodes: list[SceneNode],
+    placement_id: str,
+    placement_asset_ref: str,
+    src: GLTF2,
+    mesh_base: int,
+    block_base: int,
+    nodes_by_id: dict[str, SceneNode],
+    doc_order: dict[str, int],
+) -> tuple[list[Node], dict[str, int]]:
+    """Emit one glTF node per editor subtree row (placement first = outer wrapper)."""
+
+    preorder = _preorder_editor_subtree(scene_nodes, placement_id, doc_order)
+    placement = nodes_by_id[placement_id]
+    _validate_expanded_interior(
+        placement=placement,
+        scene_nodes=scene_nodes,
+        src_label=str(placement.name or placement_id),
+        src=src,
+        nodes_by_id=nodes_by_id,
+    )
+
+    index_map = {eid: block_base + k for k, eid in enumerate(preorder)}
+    chunk: list[Node] = []
+
+    for eid in preorder:
+        enf = nodes_by_id[eid]
+        ch_editor = _sorted_scene_child_ids(scene_nodes, eid, doc_order)
+        ch_gltf = [index_map[c] for c in ch_editor]
+
+        if eid == placement_id:
+            raw_outer = {
+                "translation": _optional_translation(enf.position),
+                "rotation": _optional_rotation(enf.rotation),
+                "scale": _optional_scale(enf.scale),
+            }
+            outer_kw = {k: v for k, v in raw_outer.items() if v is not None}
+            if enf.name:
+                outer_kw["name"] = enf.name
+            out_n = Node(**outer_kw)
+            out_n.children = ch_gltf
+            chunk.append(out_n)
+            continue
+
+        if enf.sourceGltfNodeIndex is not None:
+            chunk.append(
+                _emit_interior_mirror_clone_node(
+                    enf,
+                    src=src,
+                    mesh_base=mesh_base,
+                    child_gl_indices=ch_gltf,
+                ),
+            )
+            continue
+
+        grp_kw: dict = {}
+        ot = _optional_translation(enf.position)
+        rq = _optional_rotation(enf.rotation)
+        sc = _optional_scale(enf.scale)
+        if ot is not None:
+            grp_kw["translation"] = ot
+        if rq is not None:
+            grp_kw["rotation"] = rq
+        if sc is not None:
+            grp_kw["scale"] = sc
+        grp = Node(**grp_kw) if grp_kw else Node()
+        grp.name = enf.name or "group"
+        grp.children = ch_gltf
+        chunk.append(grp)
+
+    return chunk, index_map
+
+
 def _scene_node_attachments(enode: SceneNode) -> list[InteractionScriptAttachment]:
     merged = list(enode.interactionAttachments or [])
     if enode.interactionScriptAssetRef:
@@ -244,8 +500,10 @@ def build_scene_to_play_glb(project_id: str) -> Path:
 
     MVP rules mirror prior ``test.glb`` output; path is now under ``build/``.
     - Scene nodes may reference multiple catalog ``.glb`` assets; resources are merged into one buffer.
-    - Each placement applies editor TRS on an outer node; the **full default scene subgraph** of that
-      catalog asset (all meshes / hierarchy, multiple scene roots grouped when needed) is cloned under it.
+    - Each placement applies editor TRS on an outer wrapper. Catalogue geometry is emitted either by cloning the
+      **full opaque default‑scene subgraph** (legacy `_build_placed_catalog_nodes`), or — when authoring rows expose
+      ``sourceAssetRef`` / ``sourceGltfNodeIndex`` under that placement — by emitting **one glTF ``Node`` per expanded
+      editor tree row** with authoring TRS deltas composed against the catalogue source node matrices.
     - Editor rotations use radian Euler XYZ (Three.js-style), encoded as glTF quaternions on outer nodes.
     - Interaction script attachments are serialized under ``nodes[i].extensions[EXT_IGLTF_UMI3D_PROTO]``
       (prototype UMI3D-shaped payload); see ``docs/umi3d-proto-extension-alignment.md``.
@@ -329,6 +587,13 @@ def build_scene_to_play_glb(project_id: str) -> Path:
             needed_ids.add(cur)
             cur = nodes_by_id[cur].parentId
 
+    _extend_needed_ids_for_interior_mirrors(
+        doc.scene.nodes,
+        needed_ids,
+        nodes_by_id=nodes_by_id,
+        glb_paths_by_asset=glb_paths_by_asset,
+    )
+
     ordered_ids = sorted(needed_ids, key=lambda nid: (depth_from_root(nid), doc_order[nid]))
 
     roots = [nodes_by_id[nid] for nid in ordered_ids if nodes_by_id[nid].parentId not in needed_ids]
@@ -351,19 +616,24 @@ def build_scene_to_play_glb(project_id: str) -> Path:
     idx_outer: dict[str, int] = {}
     for eid in ordered_ids:
         idx_outer[eid] = cursor
-        cursor += (
-            _placed_catalog_instance_node_count(gltf_by_path[glb_paths_by_asset[nodes_by_id[eid].assetRef]])
-            if is_mesh_instance(eid)
-            else 1
-        )
+        cur_en = nodes_by_id[eid]
+        if cur_en.assetRef and cur_en.assetRef in glb_paths_by_asset:
+            ap = glb_paths_by_asset[cur_en.assetRef]
+            if _placement_has_expanded_interior(doc.scene.nodes, eid, str(cur_en.assetRef), nodes_by_id):
+                preorder_n = len(_preorder_editor_subtree(doc.scene.nodes, eid, doc_order))
+                cursor += preorder_n
+            else:
+                cursor += _placed_catalog_instance_node_count(gltf_by_path[ap])
+        else:
+            cursor += 1
 
     new_nodes: list[Node] = []
     for eid in ordered_ids:
         enode = nodes_by_id[eid]
         child_ids = [
-            c.id
-            for c in doc.scene.nodes
-            if c.parentId == enode.id and c.id in needed_ids
+            cid
+            for cid in _sorted_scene_child_ids(doc.scene.nodes, enode.id, doc_order)
+            if cid in needed_ids
         ]
         child_indices = [idx_outer[cid] for cid in child_ids]
 
@@ -374,17 +644,61 @@ def build_scene_to_play_glb(project_id: str) -> Path:
         }
 
         if is_mesh_instance(eid):
-            asset_path = glb_paths_by_asset[nodes_by_id[eid].assetRef]
-            outer_kw = {k: v for k, v in raw_outer.items() if v is not None}
-            base_index = len(out.nodes) + len(new_nodes)
-            chunk = _build_placed_catalog_nodes(
-                gltf_by_path[asset_path],
-                mesh_base_by_path[asset_path],
-                outer_kw,
-                base_index=base_index,
-            )
-            new_nodes.extend(chunk)
+            assert enode.assetRef is not None
+            asset_path = glb_paths_by_asset[enode.assetRef]
+            src_inst = gltf_by_path[asset_path]
+            mesh_base_here = mesh_base_by_path[asset_path]
+            if _placement_has_expanded_interior(doc.scene.nodes, eid, str(enode.assetRef), nodes_by_id):
+                base_abs = len(out.nodes) + len(new_nodes)
+                chunk_e, mapping_e = _build_expanded_placement_nodes(
+                    scene_nodes=doc.scene.nodes,
+                    placement_id=eid,
+                    placement_asset_ref=str(enode.assetRef),
+                    src=src_inst,
+                    mesh_base=mesh_base_here,
+                    block_base=base_abs,
+                    nodes_by_id=nodes_by_id,
+                    doc_order=doc_order,
+                )
+                new_nodes.extend(chunk_e)
+                idx_outer.update(mapping_e)
+            else:
+                outer_kw = {k: v for k, v in raw_outer.items() if v is not None}
+                base_index = len(out.nodes) + len(new_nodes)
+                chunk = _build_placed_catalog_nodes(
+                    src_inst,
+                    mesh_base_here,
+                    outer_kw,
+                    base_index=base_index,
+                )
+                new_nodes.extend(chunk)
         else:
+            hid = _mirror_host_placement_id(enode, nodes_by_id)
+            if (
+                hid is not None
+                and enode.sourceGltfNodeIndex is not None
+                and enode.sourceAssetRef is not None
+            ):
+                hp = nodes_by_id.get(hid)
+                if (
+                    hp is not None
+                    and hp.assetRef is not None
+                    and hp.assetRef in glb_paths_by_asset
+                    and hp.assetRef == enode.sourceAssetRef
+                    and _placement_has_expanded_interior(doc.scene.nodes, hid, hp.assetRef, nodes_by_id)
+                ):
+                    host_path = glb_paths_by_asset[hp.assetRef]
+                    src_inst = gltf_by_path[host_path]
+                    mesh_base_here = mesh_base_by_path[host_path]
+                    new_nodes.append(
+                        _emit_interior_mirror_clone_node(
+                            enode,
+                            src=src_inst,
+                            mesh_base=mesh_base_here,
+                            child_gl_indices=child_indices,
+                        ),
+                    )
+                    continue
             if child_indices:
                 raw_outer["children"] = child_indices
             new_nodes.append(Node(**{k: v for k, v in raw_outer.items() if v is not None}))
@@ -393,19 +707,20 @@ def build_scene_to_play_glb(project_id: str) -> Path:
 
     assets_by_id = {a.assetId: a for a in doc.assets}
     ext_any = False
-    for nid in needed_ids:
-        enode = nodes_by_id[nid]
-        att_list = _scene_node_attachments(enode)
+    for enode_a in doc.scene.nodes:
+        att_list = _scene_node_attachments(enode_a)
         if not att_list:
             continue
+        if enode_a.id not in idx_outer:
+            continue
         entries: list[dict] = []
-        gltf_idx = idx_outer[nid]
+        gltf_idx = idx_outer[enode_a.id]
         for att in att_list:
             pa = assets_by_id.get(att.scriptAssetRef)
             if pa is None:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"scene node {enode.name!r} references unknown script asset {att.scriptAssetRef}",
+                    detail=f"scene node {enode_a.name!r} references unknown script asset {att.scriptAssetRef}",
                 )
             rel = pa.relativePath.replace("\\", "/")
             merged_props = dict(att.serializedProps or {})
@@ -438,6 +753,27 @@ def build_scene_to_play_glb(project_id: str) -> Path:
 
     build_dir = base / "build"
     build_dir.mkdir(parents=True, exist_ok=True)
+
+    scene_js_path = build_dir / "scene.js"
+    try:
+        bundled_js = write_scene_js_bundle(base, doc, scene_js_path)
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"scene.js bundle failed: {e}") from e
+
+    if bundled_js:
+        if out.extensions is None:
+            out.extensions = {}
+        out.extensions[EXT_INTERACTIVE_GLTF] = interactive_gltf_root_extension_value()
+        if out.extensionsUsed is None:
+            out.extensionsUsed = []
+        if EXT_INTERACTIVE_GLTF not in out.extensionsUsed:
+            out.extensionsUsed.append(EXT_INTERACTIVE_GLTF)
+    else:
+        try:
+            scene_js_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
     out_path = build_dir / "scene.glb"
     try:
         out.save_binary(str(out_path))

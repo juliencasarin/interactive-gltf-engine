@@ -24,7 +24,17 @@ export type SceneNodeV2 = {
   position: Vec3
   rotation: Vec3
   scale: Vec3
+  /** Catalog `.glb` asset id — placement rows only when using catalog models. */
   assetRef?: string
+  /** Interior mirror rows: same catalog asset as the parent placement. */
+  sourceAssetRef?: string
+  /** glTF `nodes[]` index in the catalogue file (mirror rows only). */
+  sourceGltfNodeIndex?: number
+  /**
+   * Catalogue placement row id whose GLB instance feeds this mirror when the mirror is not
+   * nested under that placement in the editor hierarchy.
+   */
+  sourcePlacementId?: string
   /** Omitted means visible (Sketch parity default). */
   visible?: boolean
   /** Scene / layer tagging (minimal v1 parity). */
@@ -52,6 +62,8 @@ export type ProjectAssetEntry = {
   interactionKind?: InteractionTemplateKind
   /** Optional list of global handler names for classic scripts (preview registry). */
   scriptExports?: string[]
+  /** Bundle-time deps: other script assetIds (topological order). */
+  scriptDependsOnAssetIds?: string[]
 }
 export type EditorNode = {
   id: string
@@ -62,6 +74,10 @@ export type EditorNode = {
   scale: Vec3
   gltfDataUrl?: string
   assetRef?: string
+  sourceAssetRef?: string
+  sourceGltfNodeIndex?: number
+  /** See `SceneNodeV2.sourcePlacementId`. */
+  sourcePlacementId?: string
   visible?: boolean
   layerId?: string
   interactionAttachments?: InteractionScriptAttachment[]

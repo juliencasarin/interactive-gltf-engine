@@ -1,5 +1,5 @@
 import type { InteractiveGltfHost } from './igltfHost'
-import { INTERACTION_BASES_IMPORT_PATH, rewriteInteractionBasesImportsForBlobModule } from './interactionBasesUrl'
+import { GLTF_SCRIPT_IMPORT_PATH, INTERACTION_BASES_IMPORT_PATH, rewriteIgltfCoreImportsForBlobModule } from './interactionBasesUrl'
 import { createStubInteractiveGltfHost } from './loader'
 import type { EditorNode, InteractionScriptAttachment, InteractionSerializedPropsMap } from '@/editor/types'
 
@@ -48,14 +48,16 @@ export async function introspectExportedInteractionClass(
   try {
     /* Preload bases so blob: modules that import /igltf-core/... resolve (same-document URL). */
     if (typeof document !== 'undefined') {
+      const scriptHref = new URL(GLTF_SCRIPT_IMPORT_PATH, document.baseURI).href
       const basesHref = new URL(INTERACTION_BASES_IMPORT_PATH, document.baseURI).href
       try {
+        await import(/* @vite-ignore */ scriptHref)
         await import(/* @vite-ignore */ basesHref)
       } catch {
         // User script may still import successfully if bases were cached earlier
       }
     }
-    const blob = new Blob([rewriteInteractionBasesImportsForBlobModule(source)], { type: 'text/javascript' })
+    const blob = new Blob([rewriteIgltfCoreImportsForBlobModule(source)], { type: 'text/javascript' })
     const url = URL.createObjectURL(blob)
     try {
       const mod = await import(/* @vite-ignore */ url)
@@ -72,7 +74,7 @@ export async function introspectExportedInteractionClass(
   }
 }
 
-/** Values merged onto the class before `onLoaded` / handler (per script attachment / preview slot). */
+/** Values merged onto the class before `onLoaded` (per script attachment / preview slot). */
 export function mergeInteractionInstancePropsForAttachment(
   attachment: InteractionScriptAttachment,
   anchorNodeId: string,

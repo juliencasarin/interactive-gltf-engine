@@ -113,8 +113,8 @@ function templateComment(kind: InteractionTemplateKind, className: string, gltfT
  *   "payload": { }
  * }
  *
- * Public fields (targetId, …) come from ${baseClassForKind(kind)}; module /igltf-core/interaction-bases.js.
- * Override per scene node script attachment via serializedProps in the inspector.
+ * Class hierarchy: ${baseClassForKind(kind)} → Interaction → GlTFScript (/igltf-core/interaction-bases.js).
+ * Public fields (targetId, …) come from the kind base; override per attachment via serializedProps.
  *
  * —— payload.umi3d ——
  * ${payloadUmi3dHint(kind)}
@@ -145,8 +145,18 @@ export class ${className} extends ${baseClass} {
     super()
   }
 
-  /** Optional lifecycle hook — override for setup when the behaviour is created. */
+  /** Called once after attachment props are merged (Play boot). */
   onLoaded() {
+    // TODO
+  }
+
+  /** Optional — called each frame in Play (delta in seconds, same as R3F useFrame). */
+  onUpdate(delta) {
+    // TODO
+  }
+
+  /** Optional — called when the scene unmounts or reloads. */
+  onDelete() {
     // TODO
   }
 

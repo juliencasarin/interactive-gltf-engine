@@ -10,11 +10,24 @@ export interface IgltfVec3 {
   readonly z: number
 }
 
+export interface IgltfVec4 {
+  readonly x: number
+  readonly y: number
+  readonly z: number
+  readonly w: number
+}
+
+export type IgltfTransformSpace = 'local' | 'world'
+
 /** Opaque-ish scene reference; mutations TBD by spec. */
 export interface IgltfSceneObjectHandle {
   readonly umi3dId: string
   getLocalPosition(): IgltfVec3
   getWorldPosition(): IgltfVec3
+  getLocalRotation(): IgltfVec4
+  getWorldRotation(): IgltfVec4
+  getLocalScale(): IgltfVec3
+  getWorldScale(): IgltfVec3
   /** Example helper from proposal drafts — optional on v1 hosts */
   translateLocal?(x: number, y: number, z: number): void
 }
@@ -37,6 +50,42 @@ export type IgltfOperation =
       /** Euler angles in degrees (informative; runtime may convert). */
       eulerDegrees: IgltfVec3
     }
+  | {
+      kind: 'transform.setLocalScale'
+      entityId: string
+      scale: IgltfVec3
+    }
+  | {
+      kind: 'transform.setLocalQuaternion'
+      entityId: string
+      quaternion: IgltfVec4
+    }
+  | {
+      kind: 'hierarchy.setParent'
+      entityId: string
+      parentId: string
+    }
+  | {
+      kind: 'transform.translate'
+      entityId: string
+      delta: IgltfVec3
+      space?: IgltfTransformSpace
+    }
+  | {
+      kind: 'transform.rotate'
+      entityId: string
+      /** Euler delta in degrees. */
+      eulerDegrees: IgltfVec3
+      space?: IgltfTransformSpace
+    }
+  | {
+      kind: 'transform.rotateAround'
+      entityId: string
+      axis: IgltfVec3
+      angleDeg: number
+      pivot?: IgltfVec3
+      space?: IgltfTransformSpace
+    }
 
 /**
  * JSON-serializable transaction returned from a script handler or built via {@link IgltfTransactionBuilder}.
@@ -52,15 +101,28 @@ export interface IgltfTransaction {
 export interface IgltfTransactionBuilder {
   /**
    * Queue a local position update (DTO-only vec3, no Three.js types).
-   * @param entityId UMI3D / entity id as string (as in glTF `payload` / interaction DTO).
-   * @see proposal-interactive-gltf-javascript-scripts.md — UMI3D-shaped transactions
+   * UMI3D property key 10 (Position).
    */
   addSetLocalPosition(entityId: string, position: IgltfVec3): IgltfTransactionBuilder
   /**
    * Queue a local Euler rotation in degrees (informative until a normative rotation op exists).
-   * @see proposal-interactive-gltf-javascript-scripts.md — transaction granularity
+   * UMI3D property key 11 (Rotation) when converted to quaternion at export.
    */
   addSetLocalEulerDegrees(entityId: string, eulerDegrees: IgltfVec3): IgltfTransactionBuilder
+  /** UMI3D property key 12 (Scale). */
+  addSetLocalScale(entityId: string, scale: IgltfVec3): IgltfTransactionBuilder
+  /** UMI3D property key 11 (Rotation) as quaternion. */
+  addSetLocalQuaternion(entityId: string, quaternion: IgltfVec4): IgltfTransactionBuilder
+  /** UMI3D property key 3 (Parent). Play runtime: best-effort on Three.js clone. */
+  addSetParent(entityId: string, parentId: string): IgltfTransactionBuilder
+  addTranslate(entityId: string, delta: IgltfVec3, space?: IgltfTransformSpace): IgltfTransactionBuilder
+  addRotate(entityId: string, eulerDegrees: IgltfVec3, space?: IgltfTransformSpace): IgltfTransactionBuilder
+  addRotateAround(
+    entityId: string,
+    axis: IgltfVec3,
+    angleDeg: number,
+    opts?: { pivot?: IgltfVec3; space?: IgltfTransformSpace },
+  ): IgltfTransactionBuilder
   /** Plain transaction object for `return` from handlers. */
   build(): IgltfTransaction
   /** Same as {@link IgltfTransactionBuilder.build} (JSON-serializable snapshot). */
@@ -76,6 +138,13 @@ export interface InteractiveGltfHost {
    * @see proposal-umi3d-interaction-model.md — interaction taxonomy
    */
   createTransaction(): IgltfTransactionBuilder
+  /**
+   * Apply a transaction immediately (sync). Use from async code (`await fetch…` then execute),
+   * timers, or anywhere returning a transaction from a hook is awkward.
+   * Accepts plain `{ version: 1, operations }` or a builder from {@link createTransaction}.
+   * @returns `true` when applied; `false` when the payload was invalid.
+   */
+  executeTransaction(transaction: IgltfTransaction | IgltfTransactionBuilder): boolean
 }
 
 /** JSON-only handler argument (author payload + runtime \`umi3d\`). */

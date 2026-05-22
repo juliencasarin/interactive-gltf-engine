@@ -14,12 +14,12 @@
 
 - **Projects hub**: **`GET /studio/projects`**, **`POST /studio/projects/create`**, **`POST /studio/projects/register`**, **`DELETE /studio/projects/{id}`**. See [`../igltf-editor-backend/README.md`](../igltf-editor-backend/README.md).
 - **Project persistence (JSON first):** **`GET`/`PUT /projects/:id/document`** (response includes canonical **`document`** after **`PUT`**) and **`POST /projects/:id/assets/stage`** for uploads (files land in **`_staging/`** until **`PUT`** promotes them to **`assets/`**). Persisted models are loaded via **`GET /files/:id/assets/…`** on open (not from a local rehydrated binary cache). Details: **[`../docs/project-json-phase-plan.md`](../docs/project-json-phase-plan.md)**. Configure **`VITE_API_BASE_URL`** when the API is available. **Merging** scene + script into a single shipped **`glb`** is **not** part of this step.
-- **`GET /play/:id`**: expect **JSON** with absolute URLs for build outputs (prefers **`build/scene.glb`**, legacy **`test.glb`** still works):
+- **`GET /play/:id`**: expect **JSON** with absolute URLs for build outputs (prefers **`build/scene.glb`**, legacy **`test.glb`** still works). Optional **`jsUrl`** prefers **`build/scene.js`**, then **`build/play.js`**, then legacy root **`test.js`**:
 
   ```json
   {
     "glbUrl": "http://localhost:8000/files/{projectId}/build/scene.glb",
-    "jsUrl": "http://localhost:8000/files/{projectId}/test.js"
+    "jsUrl": "http://localhost:8000/files/{projectId}/build/scene.js"
   }
   ```
 
