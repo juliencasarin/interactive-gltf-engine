@@ -13,6 +13,9 @@ export class GlTFScript {
   /** Called once after the script instance is attached and serialized props are merged. */
   onLoaded() {}
 
+  /** Called once after all script instances exist and all `onLoaded()` hooks have settled. */
+  afterLoading() {}
+
   /** Called each frame while the scene is active (`delta` in seconds). */
   onUpdate(_delta) {}
 

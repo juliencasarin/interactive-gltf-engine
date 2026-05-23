@@ -68,7 +68,10 @@ export function PlayInteractiveGltf({ glbUrl, projectId, bundledScriptUrl, onMet
   useEffect(() => {
     if (getApiBase() === '') return
     let cancelled = false
-    const host = createPlayThreeHost(clone)
+    const scriptResolverRef: { current: ((id: string) => unknown) | null } = { current: null }
+    const host = createPlayThreeHost(clone, {
+      getScriptByAttachmentId: (id) => scriptResolverRef.current?.(id),
+    })
     hostRef.current = host
     const applyScriptResult = (result: unknown) => {
       if (isIgltfTransaction(result)) {
@@ -77,6 +80,7 @@ export function PlayInteractiveGltf({ glbUrl, projectId, bundledScriptUrl, onMet
     }
     const manager = new ScriptInstanceManager(applyScriptResult)
     instanceManagerRef.current = manager
+    scriptResolverRef.current = (id) => manager.getInstance(id)
 
     async function loadPerAssetScripts(): Promise<void> {
       const urls = collectProtoScriptUrls(parserJson.nodes, projectId)
@@ -105,14 +109,14 @@ export function PlayInteractiveGltf({ glbUrl, projectId, bundledScriptUrl, onMet
           await loadPerAssetScripts()
         }
         if (!cancelled) {
-          manager.bootstrap(parserJson.nodes)
+          await manager.bootstrap(parserJson.nodes)
         }
       } catch (e) {
         if (bundledScriptUrl) {
           console.warn('[igltf play] scene.js failed, falling back to per-asset scripts:', e)
           try {
             await loadPerAssetScripts()
-            if (!cancelled) manager.bootstrap(parserJson.nodes)
+            if (!cancelled) await manager.bootstrap(parserJson.nodes)
           } catch (e2) {
             console.error('[igltf play] interaction scripts:', e2)
           }

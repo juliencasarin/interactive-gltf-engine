@@ -1,4 +1,7 @@
 import type { InteractionTemplateKind } from '@/scriptRuntime/interactionScriptTemplates'
+import type { InteractionSerializedPropsMap } from '@/scriptRuntime/scriptInputSchema'
+
+export type { InteractionSerializedPropValue, InteractionSerializedPropsMap } from '@/scriptRuntime/scriptInputSchema'
 
 export type Vec3 = [number, number, number]
 
@@ -28,7 +31,6 @@ export type AuthoringBoundsMetadata = {
 }
 
 /** Instance props merged into the interaction class before `onLoaded` / handler (JSON-serializable). */
-export type InteractionSerializedPropsMap = Record<string, string | number | boolean | null>
 
 /** One script anchored to a scene node; runtime `targetId` is that node's id (not stored). */
 export type InteractionScriptAttachment = {

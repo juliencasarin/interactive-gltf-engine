@@ -48,6 +48,8 @@ Never use folder display name as `project_id` unless `igltf_resolve_project_id` 
 | `igltf_list_assets` | Catalog from live session |
 | `igltf_get_descriptions` | Node/asset author descriptions |
 | `igltf_get_node_details` | Full row + script attachments |
+| `igltf_introspect_script_inputs` | `@igltfInput` schema for a script catalog asset |
+| `igltf_get_script_attachment_inputs` | Attachment schema + current `serializedProps` + labels |
 | `igltf_get_bounds_metadata` | Stored `authoringBounds`; `target`: `node` \| `asset` |
 
 ### Measure (viewport; `persist` requires mutation permission)
@@ -64,7 +66,9 @@ Persisted bounds are **editor-only** — see [igltf-editor-project.md](igltf-edi
 | Category | Tools |
 |----------|-------|
 | Scene graph | `igltf_set_node_transform`, `igltf_reparent_node`, `igltf_rename_node`, `igltf_set_node_visibility`, `igltf_instantiate_asset`, `igltf_delete_nodes`, `igltf_set_description` |
-| Scripts on nodes | `igltf_add_script_to_node`, `igltf_remove_script_from_node`, `igltf_update_script_on_node` |
+| Scripts on nodes | `igltf_add_script_to_node`, `igltf_remove_script_from_node`, `igltf_update_script_on_node`, **`igltf_set_script_inputs`** |
+
+For `@igltfInput` annotated fields, prefer **`igltf_set_script_inputs`** — see [script-inputs-mcp.md](script-inputs-mcp.md). `igltf_update_script_on_node` is deprecated for annotated keys (may return a `warning`).
 
 Responses include **`mutationNotice`** when blocked.
 

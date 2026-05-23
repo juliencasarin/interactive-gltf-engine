@@ -150,6 +150,11 @@ export class ${className} extends ${baseClass} {
     // TODO
   }
 
+  /** Optional — after all script instances and async onLoaded hooks (cross-script wiring). */
+  afterLoading() {
+    // TODO: resolve @igltfInput refs, e.g. GLTF.getObjectByUmi3dId(this.doorTarget?.id)
+  }
+
   /** Optional — called each frame in Play (delta in seconds, same as R3F useFrame). */
   onUpdate(delta) {
     // TODO

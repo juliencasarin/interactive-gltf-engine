@@ -259,8 +259,13 @@ function createHandle(obj: THREE.Object3D, id: string): IgltfSceneObjectHandle {
   }
 }
 
-export function createPlayThreeHost(root: THREE.Object3D): InteractiveGltfHost {
+export type PlayThreeHostOptions = {
+  getScriptByAttachmentId?: (attachmentId: string) => unknown
+}
+
+export function createPlayThreeHost(root: THREE.Object3D, options?: PlayThreeHostOptions): InteractiveGltfHost {
   const handles = new Map<string, IgltfSceneObjectHandle>()
+  const getScript = options?.getScriptByAttachmentId
   return {
     apiVersion: '1.0.0',
     getObjectByUmi3dId(id: string): IgltfSceneObjectHandle | undefined {
@@ -271,6 +276,9 @@ export function createPlayThreeHost(root: THREE.Object3D): InteractiveGltfHost {
       h = createHandle(obj, id)
       handles.set(id, h)
       return h
+    },
+    getScriptByAttachmentId(attachmentId: string): unknown {
+      return getScript?.(attachmentId)
     },
     createTransaction: () => createTransactionBuilder(),
     executeTransaction(transaction) {

@@ -65,10 +65,15 @@ Export a **`class`** matching **`scriptExports[0]`** and the file stem. `/igltf-
 | Hook | When |
 |------|------|
 | **`onLoaded()`** | After instance creation; **`serializedProps`** (incl. **`targetId`**) merged |
+| **`afterLoading()`** | After all instances exist and async **`onLoaded`** settled; cross-script wiring |
 | **`onUpdate(delta)`** | Each frame (`delta` seconds) |
 | **`onDelete()`** | Play unmount / reload |
 
 One instance per proto **`attachmentId`**. Handlers reuse that instance — not `new` per click.
+
+## Script inputs (`@igltfInput`)
+
+Typed Inspector / MCP fields via JSDoc on public class properties. Stored as portable JSON refs in **`serializedProps`**; resolve at runtime with **`GLTF.getObjectByUmi3dId`** in **`afterLoading()`**. Full author doc: **`docs/editor/script-inputs.md`**. MCP: **`script-inputs-mcp.md`**.
 
 ## Interaction kind → handler method
 

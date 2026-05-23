@@ -12,6 +12,7 @@ from pygltflib import GLTF2, Node, Scene
 from app.gltf_merge import merge_embedded_glb_into
 from app.build_scene_js import write_scene_js_bundle
 from app.interactive_gltf_ext import EXT_INTERACTIVE_GLTF, interactive_gltf_root_extension_value
+from app.script_input_schema import remap_node_refs_in_serialized_props
 from app.igltf_umi3d_proto import (
     EXT_IGLTF_UMI3D_PROTO,
     interaction_kind_str,
@@ -724,6 +725,16 @@ def build_scene_to_play_glb(project_id: str) -> Path:
                 )
             rel = pa.relativePath.replace("\\", "/")
             merged_props = dict(att.serializedProps or {})
+
+            def _authoring_node_to_gltf_index(authoring_id: str) -> str | None:
+                if authoring_id in idx_outer:
+                    return str(idx_outer[authoring_id])
+                return None
+
+            merged_props = remap_node_refs_in_serialized_props(
+                merged_props,
+                _authoring_node_to_gltf_index,
+            ) or {}
             merged_props.setdefault("targetId", str(gltf_idx))
             entries.append(
                 umi3d_proto_attachment_entry(

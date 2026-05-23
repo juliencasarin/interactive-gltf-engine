@@ -1,8 +1,8 @@
+import { safeInteractionSerializedProps } from '@/scriptRuntime/scriptInputSchema'
 import type {
   EditorNode,
   EditorSettingsV2,
   InteractionScriptAttachment,
-  InteractionSerializedPropsMap,
   ProjectAssetEntry,
   ProjectFileV1,
   ProjectFileV2,
@@ -12,21 +12,7 @@ import type {
 import { normalizeLogicalFolder } from './folderUtils'
 import { parseAuthoringBoundsFromDisk } from './authoringBounds'
 
-/** Accept only JSON-serializable primitives per `InteractionSerializedPropsMap`. */
-export function safeInteractionSerializedProps(raw: unknown): InteractionSerializedPropsMap | undefined {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
-  const o = raw as Record<string, unknown>
-  const out: InteractionSerializedPropsMap = {}
-  for (const [k, v] of Object.entries(o)) {
-    if (v === null) {
-      out[k] = null
-      continue
-    }
-    const t = typeof v
-    if (t === 'string' || t === 'number' || t === 'boolean') out[k] = v as string | number | boolean
-  }
-  return Object.keys(out).length ? out : undefined
-}
+export { safeInteractionSerializedProps }
 
 export function newAttachmentId(): string {
   return globalThis.crypto?.randomUUID?.() ?? `a_${Math.random().toString(36).slice(2)}`

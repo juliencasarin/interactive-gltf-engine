@@ -164,6 +164,9 @@ export function createStubInteractiveGltfHost(): InteractiveGltfHost {
       }
       return h
     },
+    getScriptByAttachmentId() {
+      return undefined
+    },
     createTransaction: () => createTransactionBuilder(),
     executeTransaction(transaction) {
       const tx = normalizeIgltfTransaction(transaction)

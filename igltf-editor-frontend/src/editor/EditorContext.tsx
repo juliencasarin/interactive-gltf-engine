@@ -10,6 +10,7 @@ import {
 } from 'react'
 import {
   assetsWatchUrl,
+  fetchAssetSource,
   fetchDocument,
   fetchGltfInteriorManifest,
   fetchStudioProjects,
@@ -1785,6 +1786,7 @@ export function EditorProvider({
       updateInteractionAttachment,
       measureSceneNodeBounds: measureSceneNodeBoundsFromViewport,
       measureAssetBounds: measureAssetBoundsFromViewport,
+      fetchScriptSource: (assetId: string) => fetchAssetSource(projectIdRef.current, assetId),
     }),
     [
       updateNode,

@@ -32,6 +32,38 @@ export interface IgltfSceneObjectHandle {
   translateLocal?(x: number, y: number, z: number): void
 }
 
+/** Stored JSON ref for a scene node input (`@igltfInput` kind `node`). */
+export interface IgltfNodeInputRef {
+  readonly kind: 'node'
+  readonly id: string
+}
+
+/** Stored JSON ref for a script catalog asset (`@igltfInput` kind `script`). */
+export interface IgltfScriptInputRef {
+  readonly kind: 'script'
+  readonly assetId: string
+  readonly exportName?: string
+}
+
+/** Stored JSON ref for a glTF catalog asset (`@igltfInput` kind `gltfAsset`). */
+export interface IgltfGltfAssetInputRef {
+  readonly kind: 'gltfAsset'
+  readonly assetId: string
+}
+
+/** Stored JSON ref for a script attachment on a scene node (`@igltfInput` kind `scriptAttachment`). */
+export interface IgltfScriptAttachmentInputRef {
+  readonly kind: 'scriptAttachment'
+  readonly nodeId: string
+  readonly attachmentId: string
+}
+
+export type IgltfInputRef =
+  | IgltfNodeInputRef
+  | IgltfScriptInputRef
+  | IgltfScriptAttachmentInputRef
+  | IgltfGltfAssetInputRef
+
 /**
  * Single operation inside a transaction (informative JSON shapes; normative schema TBD).
  * Align with UMI3D-style EDK / entity-update operations and
@@ -132,6 +164,8 @@ export interface IgltfTransactionBuilder {
 export interface InteractiveGltfHost {
   readonly apiVersion: `${number}.${number}.${number}`
   getObjectByUmi3dId(id: string): IgltfSceneObjectHandle | undefined
+  /** Live script instance for a proto attachment id (Play bootstrap). */
+  getScriptByAttachmentId(attachmentId: string): unknown
   /**
    * Start a transaction the author can populate and return from an interaction `callback`.
    * Informative JSON matches `IgltfTransaction` until a formal `Umi3dTransactionJSON` schema ships.
