@@ -13,7 +13,7 @@
 ## Backend integration (iteration 1)
 
 - **Projects hub**: **`GET /studio/projects`**, **`POST /studio/projects/create`**, **`POST /studio/projects/register`**, **`DELETE /studio/projects/{id}`**. See [`../igltf-editor-backend/README.md`](../igltf-editor-backend/README.md).
-- **Project persistence (JSON first):** **`GET`/`PUT /projects/:id/document`** (response includes canonical **`document`** after **`PUT`**) and **`POST /projects/:id/assets/stage`** for uploads (files land in **`_staging/`** until **`PUT`** promotes them to **`assets/`**). Persisted models are loaded via **`GET /files/:id/assets/…`** on open (not from a local rehydrated binary cache). Details: **[`../docs/project-json-phase-plan.md`](../docs/project-json-phase-plan.md)**. Configure **`VITE_API_BASE_URL`** when the API is available. **Merging** scene + script into a single shipped **`glb`** is **not** part of this step.
+- **Project persistence (JSON first):** **`GET`/`PUT /projects/:id/document`** (response includes canonical **`document`** after **`PUT`**) and **`POST /projects/:id/assets/stage`** for uploads (files land in **`_staging/`** until **`PUT`** promotes them to **`assets/`**). Persisted models are loaded via **`GET /files/:id/assets/…`** on open (not from a local rehydrated binary cache). Details: **[`../docs/editor/project-persistence.md`](../docs/editor/project-persistence.md)** and **[`../docs/editor/igltf-editor-project.md`](../docs/editor/igltf-editor-project.md)**. Configure **`VITE_API_BASE_URL`** when the API is available. **Merging** scene + script into a single shipped **`glb`** is **not** part of this step.
 - **`GET /play/:id`**: expect **JSON** with absolute URLs for build outputs (prefers **`build/scene.glb`**, legacy **`test.glb`** still works). Optional **`jsUrl`** prefers **`build/scene.js`**, then **`build/play.js`**, then legacy root **`test.js`**:
 
   ```json
@@ -42,7 +42,7 @@
 
 ## Spec impact
 
-UI labels are non-normative; **data shapes** sent to the API and embedded in glTF **are** normative and must stay aligned with **`interactive-gltf-specs`** (`proposals/` / `specifications/`). Use **`sync-interactive-gltf-format-from-engine`** in that repository when changing them.
+UI labels and editor-only fields are non-normative. **Exported** glTF extension JSON and **portable** script/host contracts must stay aligned with **`interactive-gltf-specs`**. Use **`sync-interactive-gltf-format-from-engine`** there when those change — not for `project.json`-only fields.
 
 ## Sketcher migration (UI parity)
 

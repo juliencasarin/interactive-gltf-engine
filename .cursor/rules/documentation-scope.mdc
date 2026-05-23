@@ -1,0 +1,32 @@
+---
+description: Product and engineering docs live in interactive-gltf-engine; portable format in specs repo
+alwaysApply: true
+---
+
+# Documentation scope (interactive-gltf-engine)
+
+This repository holds **reference implementation**, **igltf-editor**, **Tauri packaging**, and **engineering docs**. Portable glTF extension and JS scripting **normative** text lives in **`interactive-gltf-specs`**, not here.
+
+## Where to write documentation
+
+| Topic | Location |
+|-------|----------|
+| igltf-editor UI, MCP, sessions, `project.json` | **`docs/`** (e.g. `docs/editor/`) |
+| Backend HTTP/WS API, storage layout, exporter | **`docs/`** or **`igltf-editor-backend/docs/`** |
+| Tauri / desktop build | **`tauri-build/README.md`**, **`docs/`** |
+| Sketcher migration, ROADMAP items | **`docs/`**, **`ROADMAP.md`** |
+| MCP authoring kit (operational script hints) | **`igltf-editor-backend/authoring_kit/`** |
+| Component setup (dev server, env vars) | Component **`README.md`** |
+| **Portable** glTF extensions + JS scripting language | **`interactive-gltf-specs`** (`proposals/`, `specifications/`) |
+
+## Sync with specs (narrow trigger)
+
+1. Document **full editor truth** in **`docs/editor/`** (this repo).
+2. When behaviour **extends or diverges** from **`interactive-gltf-specs`**, create or update a **proposal** there (`sync-interactive-gltf-format-from-engine`).
+
+Sync only when code changes **exported** asset meaning (glTF extensions, portable script bundle, shared host API). Editor-only fields stay in **`docs/editor/`**.
+
+## Skills
+
+- **`migrate-sketcher-feature`** — editor UI/UX parity; docs stay in **`docs/`** here.
+- Spec skills (`create-gltf-extension`, `manage-proposal-open-issues`, …) — run in **interactive-gltf-specs**, not for editor proposals.

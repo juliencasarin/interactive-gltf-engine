@@ -24,12 +24,39 @@ Embedded **Streamable HTTP** MCP on **`GET/POST`** path **`PUBLIC_BASE_URL` + `/
 | `igltf_list_framework_files` | Relative paths (`*.md`, `*.js`, `*.txt`) under the bundled `authoring_kit/` |
 | `igltf_read_framework_file` | Read one file safely (blocks traversal); **correlate versions with `/health`** (`engineVersion`). |
 
+**Live scene (editor session):** while the igltf-editor is open on a project, it pushes snapshots on **`WS /projects/{project_id}/editor/session`**. MCP read/write scene tools use that live session (not unsaved-on-disk `project.json`). Enable **`editorSettings.mcpAllowSceneEdition`** in the editor **Settings** menu before mutation tools are accepted.
+
+| Tool | Purpose |
+|------|--------|
+| `igltf_get_editor_session_status` | **Start here:** `canMutateScene`, `canReadLiveSession`, `userMessage`, `userAction` |
+| `igltf_list_registered_projects` | Hub UUID + diskPath + session state for every project |
+| `igltf_resolve_project_id` | UUID from workspace path (`.igltf/project-id`) or folder name |
+| `igltf_list_scene_hierarchy` | Compact tree (`hasDescription`, `hasScripts`, …) |
+| `igltf_list_assets` | Catalog from live session |
+| `igltf_get_descriptions` | Node/asset author descriptions |
+| `igltf_get_node_details` | Full node row + script attachments |
+| `igltf_get_bounds_metadata` | Stored `authoringBounds` on node or asset |
+| `igltf_measure_scene_node_bounds` | Viewport AABB + sphere for a scene node (`persist` optional) |
+| `igltf_measure_asset_bounds` | Model-local bounds for a catalog glTF (`persist` optional) |
+| `igltf_set_node_transform` | Transform (local/world) |
+| `igltf_reparent_node` | Reparent / reorder |
+| `igltf_rename_node` | Rename |
+| `igltf_set_node_visibility` | Show/hide |
+| `igltf_instantiate_asset` | Place catalog glTF |
+| `igltf_delete_nodes` | Delete subtrees |
+| `igltf_set_description` | Node or asset description |
+| `igltf_add_script_to_node` | Attach script asset |
+| `igltf_remove_script_from_node` | Remove attachment |
+| `igltf_update_script_on_node` | Patch `serializedProps` / script ref |
+
 Discovery: **`GET /health`** includes **`mcpPath`** (**`/mcp`**) so clients can construct the MCP URL consistently.
 
-Each **workspace folder** gains **`mcp.json`** automatically when missing (never overwritten):
+Each **workspace folder** gains **`mcp.json`** and **`.cursor/rules/igltf-no-hand-edit-project-json.mdc`** automatically when missing (never overwritten):
 
 - On **`POST /studio/projects/create`**; and  
 - On any route that invokes **`ensure_project_layout`** (`GET /document`, etc.) — backfills legacy projects opened after upgrade.
+
+The Cursor rule **forbids agents from editing `project.json`** (no MCP fallback). Scene authoring must use the **live editor session** + MCP tools, or the editor UI.
 
 Authors open the **workspace directory** (not `PUBLIC_BASE_URL` alone) in **Cursor**, **Kilocode**, etc., point the MCP client at **`http://127.0.0.1:8000/mcp`** (or your **`PUBLIC_BASE_URL` + `/mcp`**), reload MCP. The generated **`mcp.json`** nests the **`interactive-gltf-framework`** server under **`mcpServers`** with a **`url`** field aligned with **`PUBLIC_BASE_URL`**.
 
@@ -97,11 +124,13 @@ The editor persists via **`PUT /document`**, which **deletes orphan top-level fi
 
 ## Spec impact
 
-HTTP API contracts and on-disk layout **must not contradict** interactive-gltf extension documents in **`interactive-gltf-specs`**. When they evolve, update **`proposals/`** / **`specifications/`** there via **`sync-interactive-gltf-format-from-engine`**.
+When **exported** glTF or portable script contracts evolve, update **`proposals/`** / **`specifications/`** in **`interactive-gltf-specs`** via **`sync-interactive-gltf-format-from-engine`**. Editor-only docs (`project.json`, MCP) stay in **`docs/`** here.
 
-## Project JSON phase (before packaged `glb` + `js` build)
+Full editor documentation: **[`../docs/editor/README.md`](../docs/editor/README.md)**.
 
-Authoring persistence uses **`project.json`** + **`assets/`** + **`_staging/`** per project id: uploads go to **`POST …/assets/stage`**; **`PUT /document`** promotes staged files, removes orphan **`assets/`** files, and returns the persisted **`document`**. Static serving under **`/files/{id}/…`** includes those paths. Full breakdown: **[`../docs/project-json-phase-plan.md`](../docs/project-json-phase-plan.md)**.
+## Project JSON phase
+
+Authoring persistence: **[`../docs/editor/project-persistence.md`](../docs/editor/project-persistence.md)** and **[`../docs/editor/igltf-editor-project.md`](../docs/editor/igltf-editor-project.md)**.
 
 The **Save API** for ad-hoc **`play.js`** / root **`test.js`** remains optional; **`POST …/build-play-glb`** writes **`build/scene.glb`** (merged catalog geometry) **and**, when the project catalog includes script files under **`assets/`**, runs **esbuild** to emit **`build/scene.js`**. The glTF JSON declares **`extensionsUsed`** entry **`EXT_interactive_gltf`** with a **`scripts`** array pointing at **`scene.js`** (`kind: classic`). Topological order follows **`scriptDependsOnAssetIds`** on each **`assets[]`** script row.
 

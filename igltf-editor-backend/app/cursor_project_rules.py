@@ -1,0 +1,50 @@
+"""Bootstrap Cursor rules into igltf-editor workspaces (never overwrite user files)."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+CURSOR_RULE_FILENAME = "igltf-no-hand-edit-project-json.mdc"
+
+# Keep in sync with interactive-gltf-engine/.cursor/rules/igltf-no-hand-edit-project-json.mdc
+CURSOR_RULE_BODY = """---
+description: STRICT — never edit project.json (no MCP fallback); use live editor session + MCP tools only
+globs: "**/project.json"
+alwaysApply: true
+---
+
+# Do not edit `project.json` (strict)
+
+Agents (Cursor, vibe coding, MCP) must **never** create, edit, or patch **`project.json`** in an igltf-editor workspace — **including when the MCP live session is disconnected**, `canMutateScene` is false, or scene tools return an error.
+
+## Forbidden
+
+- Editing `project.json` to add, move, rename, or delete scene nodes, transforms, visibility, scripts, descriptions, `authoringBounds`, or catalog rows
+- Using on-disk `project.json` as a **fallback** when MCP scene tools fail or the editor session is unavailable
+- Copying or inferring structure from other projects' `project.json` files to apply changes here
+- `PUT /document` or direct file writes to `project.json` from agent tooling (persistence is editor Save + backend API, not agent file edits)
+
+## Required workflow
+
+1. Open the project in **igltf-editor** with the authoring API running.
+2. Call **`igltf_get_editor_session_status`** (or read `sessionCapabilities` / `mutationNotice` on live read tools).
+3. If `canMutateScene` is false: **stop and tell the user** using `userMessage` and `userAction` from MCP — **do not bypass via disk**.
+4. Apply scene changes **only** through **MCP scene mutation tools** on the live session, or the **editor UI** (then Save).
+5. For catalog assets: add or change files under **`{workspace}/assets/`** and rely on backend **disk sync** — do not hand-edit the assets catalog in `project.json`.
+
+## If the session is unavailable
+
+Ask the user to open igltf-editor on this workspace and enable **Settings → Allow scene edition**. **Do not** modify `project.json`.
+
+Reading `project.json` for inspection or debugging is allowed; **writing is not**.
+"""
+
+
+def write_project_cursor_rule_if_absent(project_root: Path) -> bool:
+    rules_dir = Path(project_root) / ".cursor" / "rules"
+    target = rules_dir / CURSOR_RULE_FILENAME
+    if target.is_file():
+        return False
+    rules_dir.mkdir(parents=True, exist_ok=True)
+    target.write_text(CURSOR_RULE_BODY, encoding="utf-8")
+    return True

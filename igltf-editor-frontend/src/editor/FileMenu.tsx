@@ -23,6 +23,7 @@ export function FileMenu({ projectBasename }: { projectBasename: string }) {
     addGltfFromFile,
     replaceProjectState,
     saveProjectToServer,
+    editorSettings,
     markSavedBaseline,
     newProject,
   } = useEditor()
@@ -44,7 +45,7 @@ export function FileMenu({ projectBasename }: { projectBasename: string }) {
 
   const downloadExport = useCallback(() => {
     if (isApiConfigured()) {
-      const doc = toProjectFileV2(nodes, projectAssets, assetFoldersExplicit)
+      const doc = toProjectFileV2(nodes, projectAssets, assetFoldersExplicit, editorSettings)
       downloadTextFile(
         `${projectBasename || 'project'}.json`,
         JSON.stringify(doc, null, 2),
@@ -54,11 +55,11 @@ export function FileMenu({ projectBasename }: { projectBasename: string }) {
     }
     markSavedBaseline()
     closeMenu()
-  }, [projectBasename, nodes, projectAssets, assetFoldersExplicit, markSavedBaseline, closeMenu])
+  }, [projectBasename, nodes, projectAssets, assetFoldersExplicit, editorSettings, markSavedBaseline, closeMenu])
 
   const downloadExportBackup = useCallback(() => {
     if (isApiConfigured()) {
-      const doc = toProjectFileV2(nodes, projectAssets, assetFoldersExplicit)
+      const doc = toProjectFileV2(nodes, projectAssets, assetFoldersExplicit, editorSettings)
       downloadTextFile(
         `${projectBasename || 'project'}-backup.json`,
         JSON.stringify(doc, null, 2),
@@ -67,7 +68,7 @@ export function FileMenu({ projectBasename }: { projectBasename: string }) {
       downloadTextFile(`${projectBasename || 'project'}-backup.json`, serializeProjectV1(nodes))
     }
     closeMenu()
-  }, [projectBasename, nodes, projectAssets, assetFoldersExplicit, closeMenu])
+  }, [projectBasename, nodes, projectAssets, assetFoldersExplicit, editorSettings, closeMenu])
 
   const save = useCallback(async () => {
     if (isApiConfigured()) {
@@ -101,6 +102,7 @@ export function FileMenu({ projectBasename }: { projectBasename: string }) {
         markClean: true,
         selectionId: rootId,
         assetFolders: parsed.assetFolders,
+        editorSettings: parsed.editorSettings,
       })
       closeMenu()
     },

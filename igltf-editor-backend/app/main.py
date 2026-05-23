@@ -21,6 +21,7 @@ from unicodedata import normalize
 
 from app.apply_document import apply_and_persist_project
 from app.assets_watch import handle_assets_watch_websocket
+from app.editor_session import handle_editor_session_websocket
 from app.build_play_glb import build_scene_to_play_glb
 from app.models import (
     AssetSourceBody,
@@ -47,7 +48,9 @@ from app.projects_registry import (
 )
 from app.storage import (
     ensure_project_layout,
+    file_mtime_version,
     file_url,
+    is_play_bundle_relative_path,
     project_dir,
     project_json_path,
     resolve_project_root,
@@ -156,7 +159,15 @@ def serve_project_file(project_id: str, file_path: str):
     if disk.suffix.lower() in {".js", ".mjs", ".cjs"}:
         mt = "text/javascript; charset=utf-8"
 
-    return FileResponse(str(disk), media_type=mt or "application/octet-stream")
+    headers: dict[str, str] = {}
+    if is_play_bundle_relative_path(file_path):
+        headers["Cache-Control"] = "no-store"
+
+    return FileResponse(
+        str(disk),
+        media_type=mt or "application/octet-stream",
+        headers=headers or None,
+    )
 
 
 @app.get("/studio/projects")
@@ -191,6 +202,7 @@ def studio_create_project(body: CreateIgltfProjectBody) -> dict[str, str]:
         shutil.rmtree(dest, ignore_errors=True)
         raise HTTPException(status_code=409, detail=str(e)) from e
     write_project_mcp_json_if_absent(dest)
+    ensure_project_layout(pid)
     return {"id": pid}
 
 
@@ -207,6 +219,7 @@ def studio_register_existing(body: RegisterIgltfProjectBody) -> dict[str, str]:
         pid = get_or_register_directory(p)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    ensure_project_layout(pid)
     return {"id": pid}
 
 
@@ -607,7 +620,9 @@ def play_manifest(project_id: str) -> dict[str, str]:
                 "or legacy test.glb after compile)"
             ),
         )
-    out: dict[str, str] = {"glbUrl": file_url(project_id, glb_rel)}
+    out: dict[str, str] = {
+        "glbUrl": file_url(project_id, glb_rel, version=file_mtime_version(glb_path)),
+    }
     js_candidates = [
         base / "build" / "scene.js",
         base / "build" / "play.js",
@@ -615,7 +630,8 @@ def play_manifest(project_id: str) -> dict[str, str]:
     ]
     for jp in js_candidates:
         if jp.is_file():
-            out["jsUrl"] = file_url(project_id, jp.relative_to(base.resolve()).as_posix())
+            js_rel = jp.relative_to(base.resolve()).as_posix()
+            out["jsUrl"] = file_url(project_id, js_rel, version=file_mtime_version(jp))
             break
     return out
 
@@ -624,6 +640,12 @@ def play_manifest(project_id: str) -> dict[str, str]:
 async def websocket_assets_disk_watch(websocket: WebSocket, project_id: str) -> None:
     """Live notifications after disk sync merges ``assets/`` → ``project.json``."""
     await handle_assets_watch_websocket(project_id, websocket)
+
+
+@app.websocket("/projects/{project_id}/editor/session")
+async def websocket_editor_session(websocket: WebSocket, project_id: str) -> None:
+    """Bidirectional live editor session for MCP scene read/write."""
+    await handle_editor_session_websocket(project_id, websocket)
 
 
 app.mount(MCP_MOUNT_PATH, prime_mcp_mount_handler())

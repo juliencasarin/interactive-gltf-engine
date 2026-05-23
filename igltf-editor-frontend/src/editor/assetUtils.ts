@@ -33,3 +33,9 @@ export function catalogAssetStem(relativePath: string): string {
   const raw = relativePath.trim().replace(/^.*[/\\]/, '').replace(/^.*:/, '')
   return raw.replace(/\.(js|mjs|cjs)$/i, '')
 }
+
+/** Human-readable label for catalog rows (Assets explorer, Inspector script foldouts). */
+export function assetDisplayLabel(entry: ProjectAssetEntry): string {
+  if (isScriptAssetEntry(entry)) return catalogAssetStem(entry.relativePath)
+  return (entry.name && entry.name.trim()) || entry.relativePath
+}

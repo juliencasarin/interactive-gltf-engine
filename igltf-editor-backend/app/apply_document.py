@@ -280,6 +280,7 @@ def apply_and_persist_project(project_id: str, body: ProjectDocumentV2) -> Proje
             scene=body.scene,
             assets=normalized_assets,
             assetFolders=list(body.assetFolders or []),
+            editorSettings=body.editorSettings,
         )
         project_json_path(project_id).write_text(out.model_dump_json(indent=2), encoding="utf-8")
         return out

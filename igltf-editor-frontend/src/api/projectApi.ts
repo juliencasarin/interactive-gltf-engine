@@ -11,18 +11,26 @@ export function isApiConfigured(): boolean {
 }
 
 /** Browser WebSocket URL for `/projects/:id/assets/watch` (reflects HTTP base + path prefix). */
-export function assetsWatchUrl(projectId: string): string | null {
+export function wsUrlForProjectPath(projectId: string, suffix: string): string | null {
   const base = getApiBase()
   if (!base) return null
   try {
     const u = new URL(base)
     const scheme = u.protocol === 'https:' ? 'wss:' : 'ws:'
     const prefix = u.pathname && u.pathname !== '/' ? u.pathname.replace(/\/$/, '') : ''
-    const path = `/projects/${encodeURIComponent(projectId)}/assets/watch`
+    const path = `/projects/${encodeURIComponent(projectId)}/${suffix}`
     return `${scheme}//${u.host}${prefix}${path}`
   } catch {
     return null
   }
+}
+
+export function assetsWatchUrl(projectId: string): string | null {
+  return wsUrlForProjectPath(projectId, 'assets/watch')
+}
+
+export function editorSessionUrl(projectId: string): string | null {
+  return wsUrlForProjectPath(projectId, 'editor/session')
 }
 
 const LOCAL_API_HOSTS = new Set([

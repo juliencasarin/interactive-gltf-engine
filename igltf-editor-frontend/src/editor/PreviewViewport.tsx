@@ -33,6 +33,12 @@ import {
   resolveInteriorHostPlacementId,
 } from './interiorPlacementContext'
 import { accelerateGltfSceneRaycasts, disableObjectRaycast } from './gltfRaycastAcceleration'
+import {
+  registerAssetGltfRoot,
+  registerSceneNodeObject,
+  unregisterAssetGltfRoot,
+  unregisterSceneNodeObject,
+} from './editorViewportBounds'
 import { localTRSFromObjectMatrices, mirrorDeltaFromObject, type TransformSpace } from './transformMath'
 import type { EditorNode, ProjectAssetEntry } from './types'
 
@@ -209,6 +215,9 @@ function rebuildInteriorInstanceObjects(
   const { placementId, catalogAssetId, objectsByIndex, baselinesByIndex, objectsByEditorId } = interior
 
   stripAllIgltfPreviewDuplicatesUnder(sceneRoot)
+  for (const editorId of objectsByEditorId.current.keys()) {
+    unregisterSceneNodeObject(editorId)
+  }
   objectsByEditorId.current.clear()
 
   for (const [ix, template] of objectsByIndex.current) {
@@ -289,6 +298,10 @@ function rebuildInteriorInstanceObjects(
     pickCache: buildInteriorPickCache(nodes, placementId, catalogAssetId),
     objectsByEditorId: objectsByEditorId.current,
   })
+
+  for (const [editorId, obj] of objectsByEditorId.current) {
+    registerSceneNodeObject(editorId, obj)
+  }
 }
 
 function syncExpandedInteriorToThree(
@@ -466,6 +479,12 @@ function GltfContent({ url, interior }: { url: string; interior: GltfInteriorThr
       })
     })
   }, [clone, parserJson, interior])
+
+  useLayoutEffect(() => {
+    if (!interior?.catalogAssetId) return
+    registerAssetGltfRoot(interior.catalogAssetId, clone, interior.placementId)
+    return () => unregisterAssetGltfRoot(interior.catalogAssetId, clone, interior.placementId)
+  }, [clone, interior?.catalogAssetId])
 
   useLayoutEffect(() => {
     if (!interior) return
@@ -697,6 +716,12 @@ function SceneGroup({
       setMirrorTcAttach(null)
     }
   }, [expandedInterior, nodes, selectionId, selectedInteriorMirror?.id])
+
+  useLayoutEffect(() => {
+    if (!grp) return
+    registerSceneNodeObject(node.id, grp)
+    return () => unregisterSceneNodeObject(node.id, grp)
+  }, [grp, node.id])
 
   const interiorMirrorSelectable =
     selectedInteriorMirror !== undefined && editorInteriorVisibilityEffective(nodes, selectedInteriorMirror)

@@ -1,64 +1,68 @@
-# interactive-gltf-engine — roadmap
+# Roadmap
 
-This document lists **deferred work**, **open decisions**, and capabilities not yet implemented. Items are ordered roughly by dependency; dates are not fixed.
+Future work for **interactive-gltf-engine**. **What is shipped today:** [docs/milestone-1-scope.md](docs/milestone-1-scope.md).
 
-## Runtime (`igltf-engine`) — not in iteration 1
+Items are grouped by theme; order is indicative, not a commitment.
 
-The **`igltf-engine`** package is **skipped for the first iteration**. The **Play** view will eventually consume the manifest from **`GET /play/:id`** and run the glb + script through this runtime; until then, the play route can show a minimal placeholder or load the glb without full interactive-gltf execution.
+## Milestone 2 — product hardening
 
-**Open decisions (to settle before / while implementing `igltf-engine`)**
+- **CI** — lint, test, build on every PR (backend tests started; extend to frontend + Tauri smoke)
+- **Example project** — versioned sample workspace under `examples/` (see [examples/README.md](examples/README.md))
+- **Releases** — tagged versions aligned with `package.json` / `engineVersion`; optional Windows installer on GitHub Releases
+- **Documentation** — screenshots in README; short demo video (optional)
 
-- **Language**: TypeScript vs JavaScript + JSDoc.
-- **Bundler / package shape**: Vite library mode, rollup, esbuild, or plain ESM consumed by the frontend.
-- **Three.js** version and loader stack (`GLTFLoader` vs integration with a React wrapper).
-- **Script loading model**: ESM `import`, global IIFE, or other; how the host API is exposed (`import map`, `window`, etc.).
-- **Host API surface**: naming, capabilities, alignment with **interactive-gltf-specs** proposals.
-- **Sandboxing**: worker, iframe, or none for POC.
-- **Offline / `file:`** and static hosting constraints.
+## Runtime package (`igltf-engine`)
 
-Related older bullets (still valid once work starts):
+Extract Play/runtime from the frontend into a reusable package consumed by editor and third-party apps.
 
-- **Engine-agnostic APIs** beyond Three.js.
-- **Normative mapping** from UMI3D interaction concepts to extension fields (beyond POC subset).
+Open decisions:
 
-## Packaging and format
+- TypeScript vs JavaScript + JSDoc
+- Bundle shape (ESM library vs consumed by Vite host)
+- Script sandbox (worker, iframe, none)
+- Alignment with **interactive-gltf-specs** host API naming
 
-- **Single `.glb` vs folder/zip** for distribution; zip/folder tooling.
-- **Script module shape**: single bundle vs multiple modules; how `extensions` reference script entrypoints.
-- **Strict glTF merge**: merge arbitrary sources (`.obj`, etc.) into one interactive glTF; glTF Validator in CI.
-- Formalize the **quick & dirty** save API into a versioned contract (see Backend below).
+Until then, Play logic lives in `igltf-editor-frontend` (`PlayInteractiveGltf.tsx`, `scriptRuntime/`).
 
-## Near-term: project JSON on the server (no compile step)
+## Editor & authoring
 
-- **Authoring truth**: `project.json` (v2) under each project id; references **asset files** on disk (or future object storage). See **[`docs/project-json-phase-plan.md`](docs/project-json-phase-plan.md)** for planned **frontend and backend** changes.
-- **Deferred**: merge / “compilation” into a single shipped `glb` + `js`; `GET /play/:id` manifest stays as documented for when that build exists.
+- Authentication and multi-user workspaces
+- Visual interaction graph, debugging, live reload
+- Layer UI for `layerId`
+- Script dependency graph editor for `scriptDependsOnAssetIds`
+- Inspector control for authoring bounds measurement
+- MCP: interior expand/collapse, script file creation
+- Richer import pipeline (formats beyond glTF-first)
 
-## Editor (frontend)
+## Backend & deployment
 
-- **Authentication and workspaces**: user accounts, project ids beyond fixed `test`.
-- **Rich authoring**: visual graph for interactions, debugging, breakpoints, live reload.
-- **Import pipeline UI**: drag-drop for all supported formats; asset cleanup and material policy.
-- **Play view**: integrate **`igltf-engine`** when that package exists (today: strict split — editor preview vs play runtime).
-
-## Backend
-
-- **Stable REST contract**: document request/response schemas for save and `/play/:id`; multipart vs JSON+base64; error model.
-- **MongoDB** (or other DB): metadata, versioning, asset catalog, user ownership.
-- **AuthN/AuthZ**: OIDC, API keys, org roles.
-- **Object storage**: S3-compatible blobs instead of local disk.
-- **CDN and signed URLs** for `/files/...`.
+- Stable OpenAPI / JSON Schema for public REST contract
+- AuthN/AuthZ (OIDC, API keys)
+- Object storage (S3-compatible) instead of local disk only
+- CDN and signed URLs for `/files/…`
+- ETag / conflict resolution for concurrent edits
+- Optional MongoDB or metadata service (not required for core authoring)
 
 ## Core library (`igltf-editor-core`)
 
-- **End of POC**: decide what to **extract** from **`igltf-editor-backend`** (glTF patching, extension JSON builders, path conventions) into **`igltf-editor-core`**.
-- **Framework-agnostic** glTF manipulation beyond the first extraction.
-- **Validation** hooks (glTF Validator, custom extension rules).
+End of POC: extract glTF merge, extension builders, and validation from `igltf-editor-backend` into a shared Python package.
 
-## Process and quality
+## Format & packaging
 
-- **CI** for packages (lint, test, build) once code lands.
-- **Versioning** of extension namespaces and engine semver alignment with spec releases.
+- Single-artifact distribution (zip/folder) vs sidecar `scene.js`
+- glTF Validator in CI for exported assets
+- Skin / animation support for interior mirror export
+- Rename prototype extension `EXT_IGLTF_UMI3D_PROTO` when specs freeze naming
 
-## Specification repository hygiene
+When exported glTF or portable script contracts change, update **interactive-gltf-specs** in the same effort (see specs repo skill `sync-interactive-gltf-format-from-engine`).
 
-When roadmap items **change** the format or host contract, update **`proposals/`** and **`specifications/`** in the **`interactive-gltf-specs`** repository and apply the **`sync-interactive-gltf-format-from-engine`** skill there (`.cursor/skills/sync-interactive-gltf-format-from-engine/SKILL.md`) so the spec project stays the source of portable truth.
+## Explicitly out of scope (for now)
+
+- MongoDB as required dependency
+- Multi-tenant production SaaS
+- Full DCC parity with proprietary authoring tools
+- Copying proprietary UMI3D SDK code (read-only reference only)
+
+## Sketcher migration
+
+UI parity targets vs UMI3D Sketcher: [docs/sketcher-migration/](docs/sketcher-migration/) and [igltf-editor-frontend/migration.md](igltf-editor-frontend/migration.md). Tracked separately from this roadmap.

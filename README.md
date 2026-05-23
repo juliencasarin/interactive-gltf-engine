@@ -1,48 +1,89 @@
 # interactive-gltf-engine
 
-**Reference implementation (POC and beyond)** for **interactive-gltf**: web runtimes and tooling that load, author, package, and execute interactive glTF assets.
+This editor and runtime POC implements [**interactive-gltf**](https://github.com/UMI3D/interactive-gltf-specs): a **reprise** of the **3D interaction design pattern** introduced by **[UMI3D](https://github.com/UMI3D)** in a **web-compatible glTF** form, with the progressive ambition to author **3D engine- and device-agnostic** interactive content.
 
-Portable format definitions (**`proposals/`**, **`specifications/`**) live in the separate **`interactive-gltf-specs`** repository. This repository holds **JavaScript/TypeScript/Python** code and app scaffolding only.
+The UMI3D protocol was defined in Julien Casarin’s thesis (2019, Université de Strasbourg), supervised by **Professor Dominique Bechmann** and **Jean-François Gaudy**, in collaboration with the **IGG** team at the **ICube** laboratory:
 
-## Sub-projects
+- **Français (document source) :** [*Proposition d'un protocole web pour la collaboration multi-support en environnement 3D : UMI3D*](https://theses.hal.science/tel-02518604/)
+- **English title (informative):** *Proposal for a web protocol for multi-support collaboration in 3D environment: UMI3D*
+
+Reference open-source repositories: **[github.com/UMI3D](https://github.com/UMI3D)** — notably [UMI3D-SDK](https://github.com/UMI3D/UMI3D-SDK), [UMI3D-BROWSER](https://github.com/UMI3D/UMI3D-BROWSER), and [UMI3D-Sketcher](https://github.com/UMI3D/UMI3D-Sketcher).
+
+**Acknowledgement.** **interactive-gltf** and **igltf-editor** also build on more than a decade of research and product engineering by the **XR team at Inetum** (2015–2026): protocol design, SDK, browsers, Sketcher, and production collaborative 3D systems. **None of this would exist without that work.** Personally, I thank every member of my team for the amazing work. This repository implements that design pattern on **glTF** (authoring, Play, MCP)—step by step toward interactive 3D content that stays **3D engine- and device-agnostic**.
+
+> **Status:** Milestone 1 (POC). No authentication, not production-hardened. See [docs/milestone-1-scope.md](docs/milestone-1-scope.md).
+
+## Core principles
+
+> **Compose glTF. Script behaviour. Ship one bundle. Build with AI at the scene.**
+
+| | Principle | What it means |
+|---|-----------|---------------|
+| **1** | **One merged glTF** | Import `.glb` / `.gltf` assets, arrange them in a scene graph, **export a single `build/scene.glb`** — geometry, materials, nodes, and interaction metadata in one portable file. |
+| **2** | **JavaScript for interactivity** | Behaviours live in **JavaScript**, not in a proprietary DSL. Edit in **Monaco**, attach scripts to nodes, bundle to **`build/scene.js`**. The language and host API are specified in [**interactive-gltf-specs**](https://github.com/UMI3D/interactive-gltf-specs). |
+| **3** | **UMI3D interaction pattern → glTF** | Tools, interactables, and interaction handlers follow the **UMI3D design pattern**, serialized as **glTF extensions** — the same mental model, a **web-native, engine-portable** asset. |
+| **4** | **Born in vibe coding** | **MCP-first** authoring: Cursor and other agents connect to a **live editor session**, inspect the scene, and **mutate hierarchy, transforms, and scripts** through typed tools — not by patching JSON on disk. See [docs/editor/mcp-scene-authoring.md](docs/editor/mcp-scene-authoring.md). |
+| **5** | **Author → Build → Play** | Sketcher-inspired **web editor** (hierarchy, viewport, inspector, assets), **Build** to export, **Play** in the browser (or **Windows desktop** via Tauri) with real pointer interactions and script lifecycle. |
+| **6** | **Engine- and device-agnostic output** | The deliverable is **standard glTF + JS**, not a single-vendor runtime lock-in. Author once; target web today, other engines and devices as runtimes adopt the format. |
+
+**In one line:** igltf-editor is where **3D assets become interactive products** — merged glTF, scripted logic, AI-assisted scene work, and a path toward **cross-engine** delivery.
+
+## What you get today
+
+- **igltf-editor** — web UI: project hub, scene hierarchy, Three.js preview, asset catalog, Monaco script editor, MCP-friendly live session
+- **Backend API** — FastAPI: `project.json` persistence, asset staging, Play bundle export (`build/scene.glb` + `scene.js`), MCP tools
+- **Play** — load merged glTF + scripts; interaction handlers and `GLTF` host transactions
+- **Desktop (Windows)** — optional Tauri + embedded backend ([tauri-build/README.md](tauri-build/README.md))
+
+Portable **format** definitions (glTF extensions, JS scripting language) live in the separate **[interactive-gltf-specs](https://github.com/UMI3D/interactive-gltf-specs)** repository. This repo is the **product** that implements and often leads that standard.
+
+```
+interactive-gltf-specs          interactive-gltf-engine (this repo)
+  proposals / specifications  ←→   editor + backend + Play + docs/
+  portable format truth            full implemented behaviour
+```
+
+## Quick start
+
+**[GETTING_STARTED.md](GETTING_STARTED.md)** — install backend + frontend, create a project, Build & Play.
+
+```powershell
+# Terminal 1 — backend
+cd igltf-editor-backend
+copy .env.example .env
+uv sync --extra dev && npm install
+uv run uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+
+# Terminal 2 — frontend
+cd igltf-editor-frontend
+copy .env.example .env
+npm ci && npm run dev
+```
+
+Open `http://localhost:5173`.
+
+## Documentation
+
+| Document | Audience |
+|----------|----------|
+| [GETTING_STARTED.md](GETTING_STARTED.md) | First run |
+| [docs/README.md](docs/README.md) | Full doc index |
+| [docs/editor/](docs/editor/) | Product specs (schema, API, UI, MCP) |
+| [ROADMAP.md](ROADMAP.md) | What comes next |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | How to contribute |
+| [docs/public-release-checklist.md](docs/public-release-checklist.md) | Maintainer checklist before GitHub publish |
+
+## Repository layout
 
 | Directory | Role |
 |-----------|------|
-| [`igltf-engine/`](igltf-engine/) | Browser runtime: load interactive glTF, execute scripted behaviors, host API for scripts. **Not in scope for iteration 1** — see [`ROADMAP.md`](ROADMAP.md). |
-| [`igltf-editor-frontend/`](igltf-editor-frontend/) | React app: **Projects hub** (`/`), **Editor** (`/editor/:id`), **Play** (`/play/:id`). See [`README`](igltf-editor-frontend/README.md). |
-| [`igltf-editor-backend/`](igltf-editor-backend/) | FastAPI: save scenes, serve static files under `/files/...`, **`GET /play/:id`** returns JSON with absolute asset URLs. |
-| [`igltf-editor-core/`](igltf-editor-core/) | Python library for shared glTF/extension logic. **Iteration 1:** defer; move code out of the backend **at end of POC** (see [`igltf-editor-core/README.md`](igltf-editor-core/README.md)). |
-| [`tauri-build/`](tauri-build/) | Windows-focused **desktop packaging**: PyInstaller freeze + **`tauri build`** (NSIS `setup.exe`), version bump scripts. See [`tauri-build/README.md`](tauri-build/README.md). |
-
-## Proof of concept — iteration 1
-
-**In scope**
-
-- **`igltf-editor-frontend`** + **`igltf-editor-backend`** wired together.
-- **No authentication.**
-- **`projects.json` hub** + studio API on the backend: workspaces can live **anywhere on disk**; **`STORAGE_ROOT` / `IGLTF_APP_DATA_DIR`** keeps the registry (**`projects.json`**) and optional slug-only workspaces (e.g. `data/test`).
-- **Play build output:** **`build/scene.glb`** (legacy **`test.glb`** still supported). Optional bundled script **`build/scene.js`** (then **`build/play.js`**, root **`test.js`**, …).
-- **`GET /play/{id}`** returns absolute **`glbUrl`** / **`jsUrl`** URLs as before.
-- **CORS** for the frontend dev server (e.g. `http://localhost:5173`) and production origin behind a reverse proxy.
-- **Authoring persistence (near-term):** `project.json` + asset files per project id on the backend; **no** merged shipping `glb` in that phase. See [`docs/project-json-phase-plan.md`](docs/project-json-phase-plan.md).
-
-**Deferred to later iterations**
-
-- Package **`igltf-engine`** (Three.js runtime, script execution). Open design points are listed under **`igltf-engine`** in [`ROADMAP.md`](ROADMAP.md).
-- Extracting **`igltf-editor-core`** from the backend (end of POC).
-
-**Still out of scope** (see [`ROADMAP.md`](ROADMAP.md)): MongoDB, auth, multi-tenant ids, production hardening.
-
-## Related repository (format)
-
-Clone the **`interactive-gltf-specs`** repository alongside this project. Any change here that **alters** extension JSON, script discovery, security model, or host API **must** be reflected there.
-
-Contributors with both repos in a workspace should use the Cursor skill **`sync-interactive-gltf-format-from-engine`** from the **specs** repository (`.cursor/skills/sync-interactive-gltf-format-from-engine/SKILL.md`).
-
-## Reference material (read-only)
-
-If **`UMI3D-SDK-version-2.9`** is present in the workspace, it remains **read-only** UMI3D reference. Do not copy proprietary SDK code; align **concepts and identifiers** with interactive-gltf extension text in **interactive-gltf-specs** instead.
+| [igltf-editor-frontend/](igltf-editor-frontend/) | React app: hub, editor, Play |
+| [igltf-editor-backend/](igltf-editor-backend/) | FastAPI, MCP, export pipeline |
+| [tauri-build/](tauri-build/) | Desktop packaging |
+| [docs/](docs/) | Engineering documentation |
+| [igltf-engine/](igltf-engine/) | Standalone runtime package (deferred) |
+| [igltf-editor-core/](igltf-editor-core/) | Shared Python library (deferred) |
 
 ## License
 
-See [`LICENSE`](LICENSE) (Apache 2.0).
+[Apache License 2.0](LICENSE)

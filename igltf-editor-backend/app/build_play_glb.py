@@ -506,7 +506,7 @@ def build_scene_to_play_glb(project_id: str) -> Path:
       editor tree row** with authoring TRS deltas composed against the catalogue source node matrices.
     - Editor rotations use radian Euler XYZ (Three.js-style), encoded as glTF quaternions on outer nodes.
     - Interaction script attachments are serialized under ``nodes[i].extensions[EXT_IGLTF_UMI3D_PROTO]``
-      (prototype UMI3D-shaped payload); see ``docs/umi3d-proto-extension-alignment.md``.
+      (prototype UMI3D-shaped payload); see ``docs/editor/play-export.md``.
     """
     try:
         base = project_dir(project_id)

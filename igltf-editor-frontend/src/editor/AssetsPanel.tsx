@@ -8,7 +8,7 @@ import {
 } from './folderUtils'
 import { DEFAULT_SCRIPT_TEMPLATE } from '@/scriptRuntime/monacoSetup'
 import { INTERACTION_TEMPLATE_MENU, type InteractionTemplateKind } from '@/scriptRuntime/interactionScriptTemplates'
-import { catalogAssetStem, isGltfAssetEntry, isScriptAssetEntry } from './assetUtils'
+import { assetDisplayLabel, catalogAssetStem, isGltfAssetEntry, isScriptAssetEntry } from './assetUtils'
 import { MIME_ASSET, dragOverLooksLikeAsset } from './dndTypes'
 import { isApiConfigured, renameScriptStem } from '@/api/projectApi'
 import { ScriptAssetEditor } from './ScriptAssetEditor'
@@ -19,11 +19,6 @@ function fileExtensionLabel(relativePath: string): string {
   const base = relativePath.trim().replace(/^.*[/\\]/, '')
   const m = /\.([a-z0-9]{1,16})$/i.exec(base)
   return m?.[1] ? m[1].toUpperCase() : '—'
-}
-
-function assetExplorerLabel(entry: ProjectAssetEntry): string {
-  if (isScriptAssetEntry(entry)) return catalogAssetStem(entry.relativePath)
-  return (entry.name && entry.name.trim()) || `${entry.relativePath}`
 }
 
 function allCatalogPathSet(
@@ -198,7 +193,7 @@ export function AssetsExplorerPanel() {
     return projectAssets.filter((a) => {
       if (!isUnderFolder(normalizeLogicalFolder(a.logicalFolder), assetExplorerPath)) return false
       if (!fq) return true
-      const label = assetExplorerLabel(a).toLowerCase()
+      const label = assetDisplayLabel(a).toLowerCase()
       return label.includes(fq)
     })
   }, [projectAssets, assetExplorerPath, filter])
@@ -395,7 +390,7 @@ export function AssetsExplorerPanel() {
                         ev.dataTransfer.effectAllowed = 'copyMove'
                       }}
                     >
-                      {assetExplorerLabel(a)}
+                      {assetDisplayLabel(a)}
                       {isScriptAssetEntry(a) ? (
                         <span className="assetsKindBadge assetsKindBadgeScript">script</span>
                       ) : isGltfAssetEntry(a) ? (
@@ -478,7 +473,7 @@ export function AssetsExplorerPanel() {
                     <div className="assetsPropsPreview">{fileExtensionLabel(selectedAsset.relativePath)}</div>
                     <div className="assetsPropsTexts">
                       <p className="assetsPropsPrimary" title={selectedAsset.assetId}>
-                        {assetExplorerLabel(selectedAsset)}
+                        {assetDisplayLabel(selectedAsset)}
                       </p>
                       <p className="assetsPropsMuted">{selectedAsset.relativePath}</p>
                       <p className="assetsPropsMuted">
@@ -489,6 +484,20 @@ export function AssetsExplorerPanel() {
                       </p>
                     </div>
                   </div>
+                  <label className="inspectorFieldBlock" style={{ marginTop: 8 }}>
+                    <span className="inspectorBoolLbl">Description</span>
+                    <textarea
+                      className="inspectorDescriptionInput"
+                      rows={2}
+                      placeholder="Semantic hint for MCP / catalog search"
+                      value={selectedAsset.description ?? ''}
+                      onChange={(e) =>
+                        updateProjectAsset(selectedAsset.assetId, {
+                          description: e.target.value.trim() || undefined,
+                        })
+                      }
+                    />
+                  </label>
                   {isScriptAssetEntry(selectedAsset) ? (
                     <>
                       {selectedAsset.interactionKind ? (

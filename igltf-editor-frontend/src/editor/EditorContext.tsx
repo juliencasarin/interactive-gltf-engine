@@ -12,6 +12,7 @@ import {
   assetsWatchUrl,
   fetchDocument,
   fetchGltfInteriorManifest,
+  fetchStudioProjects,
   isApiConfigured,
   putDocument,
   uploadAssetStage,
@@ -26,8 +27,15 @@ import {
   placementHasExpandedInterior,
   resolveInteriorHostPlacementId,
 } from './interiorPlacementContext'
+import { buildInteriorMirrorNodesFromManifest } from './gltfInteriorMirrorNodes'
 import { readFileAsDataUrl, readFileAsText, interactionAttachmentsFromDiskNode, newAttachmentId, toProjectFileV2 } from './projectIo'
-import type { EditorNode, InteractionScriptAttachment, PanelFocus, ProjectAssetEntry, ProjectFileV2, Vec3 } from './types'
+import type { EditorNode, EditorSettingsV2, InteractionScriptAttachment, PanelFocus, ProjectAssetEntry, ProjectFileV2, Vec3 } from './types'
+import { useEditorSessionWs, type EditorSessionStatus } from './editorSessionClient'
+import type { EditorMcpCommandHandlers } from './editorMcpCommands'
+import {
+  measureAssetBoundsFromViewport,
+  measureSceneNodeBoundsFromViewport,
+} from './editorViewportBounds'
 import { inferAssetKindFromPath, isGltfAssetEntry } from './assetUtils'
 import {
   applyReparentTransform,
@@ -49,46 +57,10 @@ function uid(): string {
   return globalThis.crypto?.randomUUID?.() ?? `n_${Math.random().toString(36).slice(2)}`
 }
 
-function buildInteriorMirrorNodesFromManifest(
-  placementNodeId: string,
-  catalogueAssetRef: string,
-  manifest: GltfInteriorManifest,
-): EditorNode[] {
-  const rowsByIdx = new Map(manifest.nodes.map((r) => [r.index, r]))
-  const preorder = manifest.preorderIndices
-  const idForGltfIndex = new Map<number, string>()
-  const appended: EditorNode[] = []
-
-  for (let i = 0; i < preorder.length; i += 1) {
-    const gi = preorder[i]!
-    const row = rowsByIdx.get(gi)
-    if (!row) continue
-    if (row.hasSkin && typeof console !== 'undefined')
-      console.warn(
-        `[igltf] expanded node "${row.name}" (index ${gi}) is skinned — export/build will reject until skins are supported`,
-      )
-
-    const nid = uid()
-    idForGltfIndex.set(gi, nid)
-
-    let parentEditor: string | null = placementNodeId
-    if (row.parentIndex !== null && row.parentIndex !== undefined) {
-      parentEditor = idForGltfIndex.get(row.parentIndex) ?? parentEditor
-    }
-
-    appended.push({
-      id: nid,
-      name: row.name,
-      parentId: parentEditor,
-      position: [0, 0, 0],
-      rotation: [0, 0, 0],
-      scale: [1, 1, 1],
-      sourceAssetRef: catalogueAssetRef,
-      sourceGltfNodeIndex: gi,
-    })
-  }
-
-  return appended
+type ExpandGltfInteriorOpts = {
+  skipUndo?: boolean
+  /** Catalogue `.glb` asset id — pass when scheduling right after placement create (avoids stale doc ref). */
+  catalogAssetRef?: string
 }
 
 function defaultNodes(): EditorNode[] {
@@ -109,8 +81,9 @@ function baselineKey(
   nodes: EditorNode[],
   assets: ProjectAssetEntry[],
   assetFolders: string[],
+  editorSettings: EditorSettingsV2,
 ): string {
-  return JSON.stringify({ nodes, assets, assetFolders })
+  return JSON.stringify({ nodes, assets, assetFolders, editorSettings })
 }
 
 function wouldCycle(nodes: EditorNode[], nodeId: string, newParentId: string): boolean {
@@ -287,9 +260,13 @@ function docToEditorState(doc: ProjectFileV2): {
   nodes: EditorNode[]
   assets: ProjectAssetEntry[]
   assetFolders: string[]
+  editorSettings: EditorSettingsV2
 } {
   const assetFoldersRaw = Array.isArray(doc.assetFolders) ? doc.assetFolders : []
   const assetFolders = [...new Set(assetFoldersRaw.map(normalizeLogicalFolder).filter(Boolean))].sort()
+  const editorSettings: EditorSettingsV2 = {
+    ...(doc.editorSettings?.mcpAllowSceneEdition ? { mcpAllowSceneEdition: true } : {}),
+  }
 
   const nodes: EditorNode[] = doc.scene.nodes.map((n) => ({
     id: n.id,
@@ -298,9 +275,12 @@ function docToEditorState(doc: ProjectFileV2): {
     position: [...n.position] as Vec3,
     rotation: [...n.rotation] as Vec3,
     scale: [...n.scale] as Vec3,
+    ...(n.description?.trim() ? { description: n.description.trim() } : {}),
+    ...(n.authoringBounds ? { authoringBounds: { ...n.authoringBounds } } : {}),
     ...(n.assetRef ? { assetRef: n.assetRef } : {}),
     ...(n.sourceAssetRef ? { sourceAssetRef: n.sourceAssetRef } : {}),
     ...(typeof n.sourceGltfNodeIndex === 'number' ? { sourceGltfNodeIndex: n.sourceGltfNodeIndex } : {}),
+    ...(n.sourcePlacementId ? { sourcePlacementId: n.sourcePlacementId } : {}),
     ...(n.visible === false ? { visible: false as const } : {}),
     ...(n.layerId ? { layerId: n.layerId } : {}),
     ...(() => {
@@ -312,6 +292,8 @@ function docToEditorState(doc: ProjectFileV2): {
     assetId: a.assetId,
     relativePath: a.relativePath,
     name: a.name,
+    ...(a.description?.trim() ? { description: a.description.trim() } : {}),
+    ...(a.authoringBounds ? { authoringBounds: { ...a.authoringBounds } } : {}),
     ...(a.logicalFolder ? { logicalFolder: normalizeLogicalFolder(a.logicalFolder) } : {}),
     ...(a.assetKind ? { assetKind: a.assetKind } : {}),
     ...(a.scriptRole ? { scriptRole: a.scriptRole } : {}),
@@ -320,7 +302,7 @@ function docToEditorState(doc: ProjectFileV2): {
     ...(a.scriptExports?.length ? { scriptExports: [...a.scriptExports] } : {}),
     ...(a.scriptDependsOnAssetIds?.length ? { scriptDependsOnAssetIds: [...a.scriptDependsOnAssetIds] } : {}),
   }))
-  return { nodes, assets, assetFolders }
+  return { nodes, assets, assetFolders, editorSettings }
 }
 
 export type SceneNodePlacementOptions = {
@@ -342,6 +324,8 @@ export type AssetsDiskWatchStatus = 'idle' | 'connecting' | 'open' | 'error'
 
 export type EditorContextValue = {
   projectId: string
+  /** Absolute workspace path on disk (from studio registry), when API is available. */
+  projectDiskPath: string | null
   nodes: EditorNode[]
   projectAssets: ProjectAssetEntry[]
   /** Primary selection tail (inspector); full multi-select uses `selectedNodeIds`. */
@@ -356,6 +340,13 @@ export type EditorContextValue = {
   assetFetchRev: number
 
   assetsDiskWatch: AssetsDiskWatchStatus
+  editorSessionStatus: EditorSessionStatus
+  editorSettings: EditorSettingsV2
+  editorSettingsPersistError: string | null
+  sessionRevision: number
+  mcpAllowSceneEdition: boolean
+
+  setMcpAllowSceneEdition: (enabled: boolean) => void
 
   hierarchySearch: string
   hierarchyCollapsed: Record<string, true>
@@ -389,11 +380,13 @@ export type EditorContextValue = {
         | 'assetRef'
         | 'sourceAssetRef'
         | 'sourceGltfNodeIndex'
+        | 'description'
+        | 'authoringBounds'
       >
     >,
   ) => void
 
-  addInteractionAttachment: (nodeId: string, scriptAssetId: string) => void
+  addInteractionAttachment: (nodeId: string, scriptAssetId: string) => string
   removeInteractionAttachment: (nodeId: string, attachmentId: string) => void
   updateInteractionAttachment: (
     nodeId: string,
@@ -417,10 +410,12 @@ export type EditorContextValue = {
   createEmptyChild: (parentId: string) => void
   duplicateSceneNode: (nodeId: string) => void
   /** Instantiate editor rows from the catalogue glTF default scene (requires API + `.glb`). */
-  expandGltfInterior: (placementNodeId: string, opts?: { skipUndo?: boolean }) => Promise<void>
+  expandGltfInterior: (placementNodeId: string, opts?: ExpandGltfInteriorOpts) => Promise<void>
   /** Remove mirrored interior rows under a placement (returns to opaque catalogue merge). */
   collapseGltfInterior: (placementNodeId: string) => void
   deleteSceneSubtreesConfirm: (rootIds: string[]) => void
+  /** MCP / internal: delete without UI confirm. */
+  deleteSceneSubtrees: (rootIds: string[]) => void
   /** Direct children IDs for multi-select parity (US-SK-034). */
   selectChildrenOf: (parentId: string) => void
 
@@ -430,7 +425,10 @@ export type EditorContextValue = {
     kind: InteractionTemplateKind,
     opts?: { logicalFolder?: string; baseName?: string },
   ) => Promise<string>
-  addSceneNodeFromAsset: (assetId: string, opts?: SceneNodePlacementOptions) => void
+  addSceneNodeFromAsset: (
+    assetId: string,
+    opts?: SceneNodePlacementOptions & { name?: string },
+  ) => string | null
   updateProjectAsset: (
     assetId: string,
     patch: Partial<
@@ -445,6 +443,8 @@ export type EditorContextValue = {
         | 'scriptDependsOnAssetIds'
         | 'sourceText'
         | 'relativePath'
+        | 'description'
+        | 'authoringBounds'
       >
     >,
   ) => void
@@ -463,6 +463,7 @@ export type EditorContextValue = {
       selectedNodeIds?: string[]
       assetFolders?: string[]
       assetExplorerPath?: string[]
+      editorSettings?: EditorSettingsV2
       markClean?: boolean
     },
   ) => void
@@ -513,17 +514,20 @@ type HistorySnap = {
   nodes: EditorNode[]
   projectAssets: ProjectAssetEntry[]
   assetFoldersExplicit: string[]
+  editorSettings: EditorSettingsV2
 }
 
 function takeDocSnapshot(
   nodes: EditorNode[],
   assets: ProjectAssetEntry[],
   folders: string[],
+  editorSettings: EditorSettingsV2,
 ): HistorySnap {
   return {
     nodes: cloneNodes(nodes),
     projectAssets: cloneAssets(assets),
     assetFoldersExplicit: [...folders],
+    editorSettings: { ...editorSettings },
   }
 }
 
@@ -552,14 +556,19 @@ export function EditorProvider({
 
   const [assetExplorerPath, setAssetExplorerPathState] = useState<string[]>([])
   const [assetFoldersExplicit, setAssetFoldersExplicit] = useState<string[]>([])
+  const [editorSettings, setEditorSettings] = useState<EditorSettingsV2>({})
+  const [editorSettingsPersistError, setEditorSettingsPersistError] = useState<string | null>(null)
+  const [sessionRevision, setSessionRevision] = useState(0)
+  const [projectDiskPath, setProjectDiskPath] = useState<string | null>(null)
 
   const catalogueGlbIdSet = useMemo(() => catalogueGlbAssetIds(projectAssets), [projectAssets])
+  const mcpAllowSceneEdition = editorSettings.mcpAllowSceneEdition === true
 
   const [viewportToolMode, setViewportToolModeState] = useState<ViewportToolMode>('translate')
   const [viewportTransformSpace, setViewportTransformSpace] = useState<TransformSpace>('local')
   const [histCounts, setHistCounts] = useState({ undo: 0, redo: 0 })
 
-  const baselineRef = useRef<string>(baselineKey(defaultNodes(), [], []))
+  const baselineRef = useRef<string>(baselineKey(defaultNodes(), [], [], {}))
   const projectIdRef = useRef(projectId)
   projectIdRef.current = projectId
   /** Bump when server/local truth changes so a late GET /document must not overwrite newer state */
@@ -573,13 +582,27 @@ export function EditorProvider({
   const nodesDocRef = useRef(nodes)
   const projectAssetsDocRef = useRef(projectAssets)
   const assetFoldersDocRef = useRef(assetFoldersExplicit)
+  const editorSettingsDocRef = useRef(editorSettings)
+  const sessionRevisionRef = useRef(sessionRevision)
   nodesDocRef.current = nodes
   projectAssetsDocRef.current = projectAssets
   assetFoldersDocRef.current = assetFoldersExplicit
+  editorSettingsDocRef.current = editorSettings
+  sessionRevisionRef.current = sessionRevision
+
+  const bumpSessionRevision = useCallback(() => {
+    sessionRevisionRef.current += 1
+    setSessionRevision(sessionRevisionRef.current)
+  }, [])
 
   const expandGltfInteriorRef = useRef<
-    ((placementNodeId: string, opts?: { skipUndo?: boolean }) => Promise<void>) | undefined
+    ((placementNodeId: string, opts?: ExpandGltfInteriorOpts) => Promise<void>) | undefined
   >(undefined)
+  const scheduleExpandGltfInteriorRef = useRef(
+    (_placementNodeId: string, _opts?: ExpandGltfInteriorOpts) => {},
+  )
+  const interiorExpandQueueRef = useRef(Promise.resolve())
+  const interiorManifestCacheRef = useRef(new Map<string, GltfInteriorManifest>())
 
   const syncHistoryCounts = useCallback(() => {
     setHistCounts({
@@ -597,7 +620,12 @@ export function EditorProvider({
   const pushUndo = useCallback(() => {
     if (historyApplyingRef.current) return
     undoStackRef.current.push(
-      takeDocSnapshot(nodesDocRef.current, projectAssetsDocRef.current, assetFoldersDocRef.current),
+      takeDocSnapshot(
+        nodesDocRef.current,
+        projectAssetsDocRef.current,
+        assetFoldersDocRef.current,
+        editorSettingsDocRef.current,
+      ),
     )
     redoStackRef.current = []
     if (undoStackRef.current.length > 100) undoStackRef.current.shift()
@@ -611,11 +639,17 @@ export function EditorProvider({
     try {
       const prev = undoStackRef.current.pop()!
       redoStackRef.current.push(
-        takeDocSnapshot(nodesDocRef.current, projectAssetsDocRef.current, assetFoldersDocRef.current),
+        takeDocSnapshot(
+          nodesDocRef.current,
+          projectAssetsDocRef.current,
+          assetFoldersDocRef.current,
+          editorSettingsDocRef.current,
+        ),
       )
       setNodes(cloneNodes(prev.nodes))
       setProjectAssets(cloneAssets(prev.projectAssets))
       setAssetFoldersExplicit([...prev.assetFoldersExplicit])
+      setEditorSettings({ ...prev.editorSettings })
       setSelectedNodeIdsState((cur) => {
         const valid = cur.filter((id) => prev.nodes.some((n) => n.id === id))
         if (valid.length) return valid
@@ -623,6 +657,7 @@ export function EditorProvider({
         return rootId ? [rootId] : []
       })
       setDirty(true)
+      bumpSessionRevision()
     } finally {
       historyApplyingRef.current = false
       syncHistoryCounts()
@@ -636,11 +671,17 @@ export function EditorProvider({
     try {
       const next = redoStackRef.current.pop()!
       undoStackRef.current.push(
-        takeDocSnapshot(nodesDocRef.current, projectAssetsDocRef.current, assetFoldersDocRef.current),
+        takeDocSnapshot(
+          nodesDocRef.current,
+          projectAssetsDocRef.current,
+          assetFoldersDocRef.current,
+          editorSettingsDocRef.current,
+        ),
       )
       setNodes(cloneNodes(next.nodes))
       setProjectAssets(cloneAssets(next.projectAssets))
       setAssetFoldersExplicit([...next.assetFoldersExplicit])
+      setEditorSettings({ ...next.editorSettings })
       setSelectedNodeIdsState((cur) => {
         const valid = cur.filter((id) => next.nodes.some((n) => n.id === id))
         if (valid.length) return valid
@@ -648,6 +689,7 @@ export function EditorProvider({
         return rootId ? [rootId] : []
       })
       setDirty(true)
+      bumpSessionRevision()
     } finally {
       historyApplyingRef.current = false
       syncHistoryCounts()
@@ -710,6 +752,7 @@ export function EditorProvider({
       snapNodes: EditorNode[],
       snapAssets: ProjectAssetEntry[],
       snapFolders: string[],
+      snapEditorSettings: EditorSettingsV2,
     ) => {
       if (!isApiConfigured()) throw new Error('API not configured (set VITE_API_BASE_URL)')
       const bad = snapNodes.filter((n) => Boolean(n.gltfDataUrl) && !n.assetRef)
@@ -718,22 +761,55 @@ export function EditorProvider({
           'Cannot save to server: some models use local inline glTF only. Re-import via Import glTF… with the API running.',
         )
       const pid = projectIdRef.current
-      const doc = toProjectFileV2(snapNodes, stripEphemeralScriptSources(snapAssets), snapFolders)
+      const doc = toProjectFileV2(
+        snapNodes,
+        stripEphemeralScriptSources(snapAssets),
+        snapFolders,
+        snapEditorSettings,
+      )
       const normalized = await putDocument(pid, doc)
-      const { nodes: nn, assets: na, assetFolders: nf } = docToEditorState(normalized)
+      const { nodes: nn, assets: na, assetFolders: nf, editorSettings: nes } = docToEditorState(normalized)
       setNodes(nn)
       setProjectAssets(na)
       setAssetFoldersExplicit(nf)
+      setEditorSettings(nes)
       setAssetFetchRev((r) => r + 1)
-      baselineRef.current = baselineKey(nn, na, nf)
+      baselineRef.current = baselineKey(nn, na, nf, nes)
       setDirty(false)
+      bumpSessionRevision()
       hydrateEpochRef.current += 1
     },
     [],
   )
 
+  /** Persists editorSettings only — avoids inline glTF nodes blocking MCP toggle save. */
+  const persistEditorSettingsToServer = useCallback(async (settings: EditorSettingsV2) => {
+    if (!isApiConfigured()) throw new Error('API not configured (set VITE_API_BASE_URL)')
+    const pid = projectIdRef.current
+    const doc = await fetchDocument(pid)
+    if (!doc) throw new Error('Project not found on server')
+    const merged: ProjectFileV2 = { ...doc }
+    if (settings.mcpAllowSceneEdition) {
+      merged.editorSettings = { mcpAllowSceneEdition: true }
+    } else {
+      delete merged.editorSettings
+    }
+    const normalized = await putDocument(pid, merged)
+    const { editorSettings: nes } = docToEditorState(normalized)
+    editorSettingsDocRef.current = nes
+    setEditorSettings(nes)
+    baselineRef.current = baselineKey(
+      nodesDocRef.current,
+      projectAssetsDocRef.current,
+      assetFoldersDocRef.current,
+      nes,
+    )
+  }, [])
+
   useEffect(() => {
     clearHistoryStacks()
+    interiorManifestCacheRef.current.clear()
+    interiorExpandQueueRef.current = Promise.resolve()
     setViewportToolMode('translate')
     setLoadError(null)
     setNodes(defaultNodes())
@@ -745,7 +821,9 @@ export function EditorProvider({
     setIsolateSubtreeIdState(null)
     setAssetExplorerPathState([])
     setAssetFoldersExplicit([])
-    baselineRef.current = baselineKey(defaultNodes(), [], [])
+    setEditorSettings({})
+    setProjectDiskPath(null)
+    baselineRef.current = baselineKey(defaultNodes(), [], [], {})
 
     if (!isApiConfigured()) return
 
@@ -757,14 +835,21 @@ export function EditorProvider({
         if (cancelled) return
         if (hydrateGeneration !== hydrateEpochRef.current) return
         if (doc && doc.version === 2) {
-          const { nodes: nextNodes, assets: nextAssets, assetFolders: nf } = docToEditorState(doc)
+          const {
+            nodes: nextNodes,
+            assets: nextAssets,
+            assetFolders: nf,
+            editorSettings: nes,
+          } = docToEditorState(doc)
           setNodes(nextNodes)
           setProjectAssets(nextAssets)
           setAssetFoldersExplicit(nf)
+          setEditorSettings(nes)
           const rootId = nextNodes.find((n) => n.parentId === null)?.id ?? null
           setSelectedNodeIdsState(rootId ? [rootId] : [])
-          baselineRef.current = baselineKey(nextNodes, nextAssets, nf)
+          baselineRef.current = baselineKey(nextNodes, nextAssets, nf, nes)
           setDirty(false)
+          bumpSessionRevision()
           setAssetFetchRev((r) => r + 1)
         }
       } catch (e) {
@@ -777,6 +862,25 @@ export function EditorProvider({
       cancelled = true
     }
   }, [projectId, clearHistoryStacks, setViewportToolMode])
+
+  useEffect(() => {
+    if (!isApiConfigured()) {
+      setProjectDiskPath(null)
+      return
+    }
+    let cancelled = false
+    void fetchStudioProjects()
+      .then((rows) => {
+        if (cancelled) return
+        setProjectDiskPath(rows.find((p) => p.id === projectId)?.diskPath ?? null)
+      })
+      .catch(() => {
+        if (!cancelled) setProjectDiskPath(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [projectId])
 
   useEffect(() => {
     if (!isApiConfigured()) {
@@ -796,13 +900,15 @@ export function EditorProvider({
         const doc = await fetchDocument(projectIdRef.current)
         if (cancelled || gen !== hydrateEpochRef.current) return
         if (doc && doc.version === 2) {
-          const { nodes: nn, assets: na, assetFolders: nf } = docToEditorState(doc)
+          const { nodes: nn, assets: na, assetFolders: nf, editorSettings: nes } = docToEditorState(doc)
           setNodes(nn)
           setProjectAssets(na)
           setAssetFoldersExplicit(nf)
-          baselineRef.current = baselineKey(nn, na, nf)
+          setEditorSettings(nes)
+          baselineRef.current = baselineKey(nn, na, nf, nes)
           setDirty(false)
           clearHistoryStacks()
+          bumpSessionRevision()
           setAssetFetchRev((r) => r + 1)
         }
       } catch {
@@ -885,6 +991,8 @@ export function EditorProvider({
           | 'assetRef'
           | 'sourceAssetRef'
           | 'sourceGltfNodeIndex'
+          | 'description'
+          | 'authoringBounds'
         >
       >,
     ) => {
@@ -894,6 +1002,7 @@ export function EditorProvider({
       }
       setNodes((prev) => prev.map((n) => (n.id === id ? { ...n, ...patch } : n)))
       setDirty(true)
+      bumpSessionRevision()
       const becameCatalogueGlbPlacement =
         patch.assetRef !== undefined &&
         catalogueGlbIdSet.has(patch.assetRef) &&
@@ -901,16 +1010,17 @@ export function EditorProvider({
         before !== undefined &&
         !before.assetRef
       if (becameCatalogueGlbPlacement) {
-        globalThis.setTimeout(() => {
-          void expandGltfInteriorRef.current?.(id, { skipUndo: true })
-        }, 0)
+        scheduleExpandGltfInteriorRef.current(id, {
+          skipUndo: true,
+          catalogAssetRef: patch.assetRef,
+        })
       }
     },
-    [pushUndo, catalogueGlbIdSet],
+    [pushUndo, catalogueGlbIdSet, bumpSessionRevision],
   )
 
   const addInteractionAttachment = useCallback(
-    (nodeId: string, scriptAssetId: string) => {
+    (nodeId: string, scriptAssetId: string): string => {
       pushUndo()
       const att: InteractionScriptAttachment = { id: newAttachmentId(), scriptAssetRef: scriptAssetId }
       setNodes((prev) =>
@@ -921,6 +1031,8 @@ export function EditorProvider({
         }),
       )
       setDirty(true)
+      bumpSessionRevision()
+      return att.id
     },
     [pushUndo],
   )
@@ -936,8 +1048,9 @@ export function EditorProvider({
         }),
       )
       setDirty(true)
+      bumpSessionRevision()
     },
-    [pushUndo],
+    [pushUndo, bumpSessionRevision],
   )
 
   const updateInteractionAttachment = useCallback(
@@ -959,8 +1072,9 @@ export function EditorProvider({
         }),
       )
       setDirty(true)
+      bumpSessionRevision()
     },
-    [pushUndo],
+    [pushUndo, bumpSessionRevision],
   )
 
   const toggleNodeHierarchyVisible = useCallback((id: string) => {
@@ -997,8 +1111,9 @@ export function EditorProvider({
         return patchInteriorMirrorsAfterReparent(prev, relocated, nodeId)
       })
       setDirty(true)
+      bumpSessionRevision()
     },
-    [pushUndo, catalogueGlbIdSet],
+    [pushUndo, catalogueGlbIdSet, bumpSessionRevision],
   )
 
   const reparentSceneNode = useCallback(
@@ -1089,37 +1204,60 @@ export function EditorProvider({
   )
 
   const expandGltfInterior = useCallback(
-    async (placementNodeId: string, opts?: { skipUndo?: boolean }) => {
+    async (placementNodeId: string, opts?: ExpandGltfInteriorOpts) => {
       if (!isApiConfigured()) {
         console.warn('[igltf] expanding interior hierarchy requires configured API backend')
         return
       }
 
-      const cur = nodesDocRef.current
-      const p = cur.find((n) => n.id === placementNodeId)
-      const catRef = p?.assetRef
-      if (!catRef || !catalogueGlbIdSet.has(catRef)) return
-      if (placementHasExpandedInterior(cur, placementNodeId, catRef)) return
-
-      let manifest: GltfInteriorManifest
-      try {
-        manifest = await fetchGltfInteriorManifest(projectIdRef.current, catRef)
-      } catch (e) {
-        console.warn('[igltf] failed to fetch interior manifest', e)
+      let catRef = opts?.catalogAssetRef
+      if (!catRef) {
+        const p = nodesDocRef.current.find((n) => n.id === placementNodeId)
+        catRef = p?.assetRef
+      }
+      if (!catRef || !catalogueGlbIdSet.has(catRef)) {
+        console.warn(
+          `[igltf] expand skipped: placement "${placementNodeId}" is missing or not a catalogue .glb`,
+        )
         return
       }
 
+      if (placementHasExpandedInterior(nodesDocRef.current, placementNodeId, catRef)) return
+
+      let manifest = interiorManifestCacheRef.current.get(catRef)
+      if (!manifest) {
+        try {
+          manifest = await fetchGltfInteriorManifest(projectIdRef.current, catRef)
+          interiorManifestCacheRef.current.set(catRef, manifest)
+        } catch (e) {
+          console.warn('[igltf] failed to fetch interior manifest', e)
+          return
+        }
+      }
+
       const appended = buildInteriorMirrorNodesFromManifest(placementNodeId, catRef, manifest)
-      if (!appended.length) return
+      if (!appended.length) {
+        console.warn(`[igltf] expand skipped: empty interior manifest for asset ${catRef}`)
+        return
+      }
 
       if (!opts?.skipUndo) pushUndo()
 
+      let didAppend = false
       setNodes((prev) => {
         const placement = prev.find((n) => n.id === placementNodeId)
-        if (!placement?.assetRef || placement.assetRef !== catRef) return prev
+        if (!placement?.assetRef || placement.assetRef !== catRef) {
+          console.warn(
+            `[igltf] expand skipped: placement "${placementNodeId}" no longer exists or asset mismatch`,
+          )
+          return prev
+        }
         if (placementHasExpandedInterior(prev, placementNodeId, placement.assetRef)) return prev
+        didAppend = true
         return [...prev, ...appended]
       })
+
+      if (!didAppend) return
 
       const firstMir = appended[0]?.id
       if (firstMir) setSelectedNodeIdsState([firstMir])
@@ -1130,10 +1268,18 @@ export function EditorProvider({
         return next
       })
       setDirty(true)
+      bumpSessionRevision()
     },
-    [catalogueGlbIdSet, pushUndo],
+    [catalogueGlbIdSet, pushUndo, bumpSessionRevision],
   )
   expandGltfInteriorRef.current = expandGltfInterior
+  scheduleExpandGltfInteriorRef.current = (placementNodeId, opts) => {
+    interiorExpandQueueRef.current = interiorExpandQueueRef.current
+      .then(() => expandGltfInteriorRef.current?.(placementNodeId, opts) ?? Promise.resolve())
+      .catch((e) => {
+        console.warn('[igltf] interior expand queue task failed', e)
+      })
+  }
 
   const collapseGltfInterior = useCallback(
     (placementNodeId: string) => {
@@ -1162,37 +1308,51 @@ export function EditorProvider({
     [nodes, pushUndo],
   )
 
-  const deleteSceneSubtreesConfirm = useCallback((rootIds: string[]) => {
-    const uniq = [...new Set(rootIds)].filter((id) => id !== 'root')
-    if (!uniq.length) return
-    const minimized = minimizeSubtreeRoots(nodes, uniq)
-    if (
-      !window.confirm(
-        `Delete ${minimized.length} object(s) and their children from the hierarchy?`,
-      )
-    )
-      return
-    pushUndo()
-    const remove = new Set<string>()
-    for (const rid of minimized) {
-      const stack = [rid]
-      while (stack.length) {
-        const id = stack.pop()!
-        remove.add(id)
-        for (const c of nodes.filter((n) => n.parentId === id)) stack.push(c.id)
+  const deleteSceneSubtrees = useCallback(
+    (rootIds: string[]) => {
+      const uniq = [...new Set(rootIds)].filter((id) => id !== 'root')
+      if (!uniq.length) return
+      const minimized = minimizeSubtreeRoots(nodes, uniq)
+      pushUndo()
+      const remove = new Set<string>()
+      for (const rid of minimized) {
+        const stack = [rid]
+        while (stack.length) {
+          const id = stack.pop()!
+          remove.add(id)
+          for (const c of nodes.filter((n) => n.parentId === id)) stack.push(c.id)
+        }
       }
-    }
-    const nextNodes = nodes.filter((n) => !remove.has(n.id))
-    setNodes(nextNodes)
-    setIsolateSubtreeIdState((prev) => (prev && remove.has(prev) ? null : prev))
-    setSelectedNodeIdsState((cur) => {
-      const surviving = cur.filter((id) => !remove.has(id))
-      const rootId = nextNodes.find((n) => n.parentId === null)?.id ?? null
-      if (surviving.length) return surviving.filter((id) => nextNodes.some((n) => n.id === id))
-      return rootId ? [rootId] : []
-    })
-    setDirty(true)
-  }, [nodes, pushUndo])
+      const nextNodes = nodes.filter((n) => !remove.has(n.id))
+      setNodes(nextNodes)
+      setIsolateSubtreeIdState((prev) => (prev && remove.has(prev) ? null : prev))
+      setSelectedNodeIdsState((cur) => {
+        const surviving = cur.filter((id) => !remove.has(id))
+        const rootId = nextNodes.find((n) => n.parentId === null)?.id ?? null
+        if (surviving.length) return surviving.filter((id) => nextNodes.some((n) => n.id === id))
+        return rootId ? [rootId] : []
+      })
+      setDirty(true)
+      bumpSessionRevision()
+    },
+    [nodes, pushUndo],
+  )
+
+  const deleteSceneSubtreesConfirm = useCallback(
+    (rootIds: string[]) => {
+      const uniq = [...new Set(rootIds)].filter((id) => id !== 'root')
+      if (!uniq.length) return
+      const minimized = minimizeSubtreeRoots(nodes, uniq)
+      if (
+        !window.confirm(
+          `Delete ${minimized.length} object(s) and their children from the hierarchy?`,
+        )
+      )
+        return
+      deleteSceneSubtrees(rootIds)
+    },
+    [nodes, deleteSceneSubtrees],
+  )
 
   const selectChildrenOf = useCallback(
     (parentId: string) => {
@@ -1274,7 +1434,7 @@ export function EditorProvider({
 
         setIsSaving(true)
         try {
-          await persistSnapshotToServer(nodes, nextAssets, assetFoldersExplicit)
+          await persistSnapshotToServer(nodes, nextAssets, assetFoldersExplicit, editorSettings)
         } catch (e) {
           setDirty(true)
           throw e
@@ -1348,7 +1508,7 @@ export function EditorProvider({
 
         setIsSaving(true)
         try {
-          await persistSnapshotToServer(nodes, nextAssets, assetFoldersExplicit)
+          await persistSnapshotToServer(nodes, nextAssets, assetFoldersExplicit, editorSettings)
         } catch (e) {
           setDirty(true)
           throw e
@@ -1380,15 +1540,16 @@ export function EditorProvider({
   /** Note: avoids stale explorer path in closures by passing latest via ref-less closure each render */
 
   const addSceneNodeFromAsset = useCallback(
-    (assetId: string, opts?: SceneNodePlacementOptions) => {
+    (assetId: string, opts?: SceneNodePlacementOptions & { name?: string }): string | null => {
       const entry = projectAssets.find((a) => a.assetId === assetId)
-      if (!entry || !isGltfAssetEntry(entry)) return
+      if (!entry || !isGltfAssetEntry(entry)) return null
       pushUndo()
       const rootRef = nodes.find((n) => n.parentId === null)?.id ?? 'root'
       const parentId = opts?.parentId ?? rootRef
 
       const id = uid()
       const stem =
+        opts?.name?.trim() ||
         (entry.name && entry.name.replace(/\.(glb|gltf)$/i, '')) ||
         entry.relativePath.split('/').pop()?.replace(/\.(glb|gltf)$/i, '') ||
         'Model'
@@ -1412,12 +1573,12 @@ export function EditorProvider({
         return nh
       })
       setDirty(true)
+      bumpSessionRevision()
       const shouldAutoExpand = isApiConfigured() && catalogueGlbIdSet.has(assetId)
       if (shouldAutoExpand) {
-        globalThis.setTimeout(() => {
-          void expandGltfInteriorRef.current?.(id, { skipUndo: true })
-        }, 0)
+        scheduleExpandGltfInteriorRef.current(id, { skipUndo: true, catalogAssetRef: assetId })
       }
+      return id
     },
     [projectAssets, nodes, pushUndo, catalogueGlbIdSet],
   )
@@ -1437,6 +1598,8 @@ export function EditorProvider({
           | 'scriptDependsOnAssetIds'
           | 'sourceText'
           | 'relativePath'
+          | 'description'
+          | 'authoringBounds'
         >
       >,
     ) => {
@@ -1449,6 +1612,7 @@ export function EditorProvider({
         prev.map((a) => (a.assetId === assetId ? { ...a, ...norm } : a)),
       )
       setDirty(true)
+      bumpSessionRevision()
     },
     [pushUndo],
   )
@@ -1525,6 +1689,7 @@ export function EditorProvider({
         selectedNodeIds?: string[]
         assetFolders?: string[]
         assetExplorerPath?: string[]
+        editorSettings?: EditorSettingsV2
         markClean?: boolean
       },
     ) => {
@@ -1536,6 +1701,11 @@ export function EditorProvider({
       if (opts?.assetFolders !== undefined) {
         foldersAfterReplace = [...new Set(opts.assetFolders.map(normalizeLogicalFolder).filter(Boolean))].sort()
         setAssetFoldersExplicit(foldersAfterReplace)
+      }
+      let settingsAfterReplace = editorSettings
+      if (opts?.editorSettings !== undefined) {
+        settingsAfterReplace = { ...opts.editorSettings }
+        setEditorSettings(settingsAfterReplace)
       }
       if (opts?.assetExplorerPath !== undefined)
         setAssetExplorerPathState([...opts.assetExplorerPath])
@@ -1549,37 +1719,112 @@ export function EditorProvider({
 
       if (opts?.markClean) {
         hydrateEpochRef.current += 1
-        baselineRef.current = baselineKey(nextNodes, nextAssets, foldersAfterReplace)
+        baselineRef.current = baselineKey(nextNodes, nextAssets, foldersAfterReplace, settingsAfterReplace)
         setDirty(false)
         if (isApiConfigured()) setAssetFetchRev((r) => r + 1)
+        bumpSessionRevision()
       } else {
         setDirty(true)
       }
     },
-    [assetFoldersExplicit, clearHistoryStacks],
+    [assetFoldersExplicit, editorSettings, clearHistoryStacks, bumpSessionRevision],
   )
 
   const markSavedBaseline = useCallback(() => {
-    baselineRef.current = baselineKey(nodes, projectAssets, assetFoldersExplicit)
+    baselineRef.current = baselineKey(nodes, projectAssets, assetFoldersExplicit, editorSettings)
     setDirty(false)
-  }, [nodes, projectAssets, assetFoldersExplicit])
+  }, [nodes, projectAssets, assetFoldersExplicit, editorSettings])
+
+  const setMcpAllowSceneEdition = useCallback(
+    (enabled: boolean) => {
+      const next: EditorSettingsV2 = {
+        ...editorSettingsDocRef.current,
+        mcpAllowSceneEdition: enabled ? true : undefined,
+      }
+      editorSettingsDocRef.current = next
+      setEditorSettings(next)
+      setEditorSettingsPersistError(null)
+      bumpSessionRevision()
+
+      if (!isApiConfigured()) {
+        setDirty(true)
+        return
+      }
+
+      void persistEditorSettingsToServer(next).catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err)
+        setEditorSettingsPersistError(msg)
+        setDirty(true)
+      })
+    },
+    [persistEditorSettingsToServer, bumpSessionRevision],
+  )
+
+  const buildSessionSnapshot = useCallback((): ProjectFileV2 => {
+    return toProjectFileV2(
+      nodesDocRef.current,
+      stripEphemeralScriptSources(projectAssetsDocRef.current),
+      assetFoldersDocRef.current,
+      editorSettingsDocRef.current,
+    )
+  }, [])
+
+  const mcpCommandHandlers = useMemo<EditorMcpCommandHandlers>(
+    () => ({
+      getRevision: () => sessionRevisionRef.current,
+      getNodes: () => nodesDocRef.current,
+      getProjectAssets: () => projectAssetsDocRef.current,
+      updateNode,
+      updateProjectAsset,
+      reparentSceneNode,
+      placeSceneNodeInHierarchy,
+      addSceneNodeFromAsset,
+      deleteSceneSubtrees,
+      addInteractionAttachment,
+      removeInteractionAttachment,
+      updateInteractionAttachment,
+      measureSceneNodeBounds: measureSceneNodeBoundsFromViewport,
+      measureAssetBounds: measureAssetBoundsFromViewport,
+    }),
+    [
+      updateNode,
+      updateProjectAsset,
+      reparentSceneNode,
+      placeSceneNodeInHierarchy,
+      addSceneNodeFromAsset,
+      deleteSceneSubtrees,
+      addInteractionAttachment,
+      removeInteractionAttachment,
+      updateInteractionAttachment,
+    ],
+  )
+
+  const editorSessionStatus = useEditorSessionWs({
+    projectId,
+    enabled: isApiConfigured(),
+    revision: sessionRevision,
+    mcpAllowSceneEdition,
+    buildSnapshot: buildSessionSnapshot,
+    commandHandlers: mcpCommandHandlers,
+  })
 
   const saveProjectToServer = useCallback(async () => {
     setIsSaving(true)
     try {
-      await persistSnapshotToServer(nodes, projectAssets, assetFoldersExplicit)
+      await persistSnapshotToServer(nodes, projectAssets, assetFoldersExplicit, editorSettings)
     } finally {
       setIsSaving(false)
     }
-  }, [nodes, projectAssets, assetFoldersExplicit, persistSnapshotToServer])
+  }, [nodes, projectAssets, assetFoldersExplicit, editorSettings, persistSnapshotToServer])
 
   const newProject = useCallback(() => {
     hydrateEpochRef.current += 1
     clearHistoryStacks()
     const fresh = defaultNodes()
-    baselineRef.current = baselineKey(fresh, [], [])
+    baselineRef.current = baselineKey(fresh, [], [], {})
     setNodes(fresh)
     setProjectAssets([])
+    setEditorSettings({})
     setSelectedNodeIdsState(['root'])
     setHierarchySearchState('')
     setHierarchyCollapsed({})
@@ -1610,6 +1855,7 @@ export function EditorProvider({
   const value = useMemo<EditorContextValue>(
     () => ({
       projectId,
+      projectDiskPath,
       nodes,
       projectAssets,
       selectionId,
@@ -1621,6 +1867,11 @@ export function EditorProvider({
       isSaving,
       assetFetchRev,
       assetsDiskWatch,
+      editorSessionStatus,
+      editorSettings,
+      editorSettingsPersistError,
+      sessionRevision,
+      mcpAllowSceneEdition,
 
       hierarchySearch,
       hierarchyCollapsed,
@@ -1639,6 +1890,7 @@ export function EditorProvider({
       toggleIsolateForSelected,
       clearIsolate,
       setAssetExplorerPath: setExplorerPathSegments,
+      setMcpAllowSceneEdition,
 
       updateNode,
       addInteractionAttachment,
@@ -1654,6 +1906,7 @@ export function EditorProvider({
       expandGltfInterior,
       collapseGltfInterior,
       deleteSceneSubtreesConfirm,
+      deleteSceneSubtrees,
       selectChildrenOf,
 
       addGltfNodeLocal,
@@ -1685,6 +1938,7 @@ export function EditorProvider({
     }),
     [
       projectId,
+      projectDiskPath,
       nodes,
       projectAssets,
       selectionId,
@@ -1696,6 +1950,11 @@ export function EditorProvider({
       isSaving,
       assetFetchRev,
       assetsDiskWatch,
+      editorSessionStatus,
+      editorSettings,
+      editorSettingsPersistError,
+      sessionRevision,
+      mcpAllowSceneEdition,
       hierarchySearch,
       hierarchyCollapsed,
       isolateSubtreeId,
@@ -1707,6 +1966,7 @@ export function EditorProvider({
       toggleIsolateForSelected,
       clearIsolate,
       setExplorerPathSegments,
+      setMcpAllowSceneEdition,
       updateNode,
       addInteractionAttachment,
       removeInteractionAttachment,
@@ -1721,6 +1981,7 @@ export function EditorProvider({
       expandGltfInterior,
       collapseGltfInterior,
       deleteSceneSubtreesConfirm,
+      deleteSceneSubtrees,
       selectChildrenOf,
       addGltfNodeLocal,
       addGltfFromFile,

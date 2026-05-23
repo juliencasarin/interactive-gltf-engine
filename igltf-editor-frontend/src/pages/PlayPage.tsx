@@ -28,6 +28,7 @@ function PlayViewport({
       <directionalLight position={[6, 10, 5]} intensity={0.95} />
       <Suspense fallback={null}>
         <PlayInteractiveGltf
+          key={`${manifest.glbUrl}\0${manifest.jsUrl ?? ''}`}
           glbUrl={manifest.glbUrl}
           projectId={projectId}
           bundledScriptUrl={manifest.jsUrl}

@@ -1,5 +1,6 @@
 import type {
   EditorNode,
+  EditorSettingsV2,
   InteractionScriptAttachment,
   InteractionSerializedPropsMap,
   ProjectAssetEntry,
@@ -9,6 +10,7 @@ import type {
   Vec3,
 } from './types'
 import { normalizeLogicalFolder } from './folderUtils'
+import { parseAuthoringBoundsFromDisk } from './authoringBounds'
 
 /** Accept only JSON-serializable primitives per `InteractionSerializedPropsMap`. */
 export function safeInteractionSerializedProps(raw: unknown): InteractionSerializedPropsMap | undefined {
@@ -82,6 +84,8 @@ function editorNodeToSceneNodeV2(n: EditorNode): SceneNodeV2 {
   if (n.sourcePlacementId) out.sourcePlacementId = n.sourcePlacementId
   if (n.visible === false) out.visible = false
   if (n.layerId) out.layerId = n.layerId
+  if (n.description?.trim()) out.description = n.description.trim()
+  if (n.authoringBounds) out.authoringBounds = { ...n.authoringBounds }
   if (n.interactionAttachments?.length) {
     out.interactionAttachments = n.interactionAttachments.map((a) => {
       const row: InteractionScriptAttachment = {
@@ -127,6 +131,7 @@ export function toProjectFileV2(
   nodes: EditorNode[],
   assets: ProjectAssetEntry[],
   assetFoldersExplicit?: string[],
+  editorSettings?: EditorSettingsV2,
 ): ProjectFileV2 {
   const sceneNodes = nodes.map(editorNodeToSceneNodeV2)
   const doc: ProjectFileV2 = {
@@ -137,6 +142,8 @@ export function toProjectFileV2(
       assetId: a.assetId,
       relativePath: a.relativePath,
       name: a.name,
+      ...(a.description?.trim() ? { description: a.description.trim() } : {}),
+      ...(a.authoringBounds ? { authoringBounds: { ...a.authoringBounds } } : {}),
       ...(a.logicalFolder ? { logicalFolder: normalizeLogicalFolder(a.logicalFolder) } : {}),
       ...(a.assetKind ? { assetKind: a.assetKind } : {}),
       ...(a.scriptRole ? { scriptRole: a.scriptRole } : {}),
@@ -148,6 +155,9 @@ export function toProjectFileV2(
   }
   const af = [...new Set((assetFoldersExplicit ?? []).map(normalizeLogicalFolder).filter(Boolean))].sort()
   if (af.length) doc.assetFolders = af
+  if (editorSettings?.mcpAllowSceneEdition) {
+    doc.editorSettings = { mcpAllowSceneEdition: true }
+  }
   return doc
 }
 
@@ -187,9 +197,25 @@ function editorNodeFromSceneLike(raw: Record<string, unknown>, vecs: {
     ...(typeof raw.sourcePlacementId === 'string' && raw.sourcePlacementId
       ? { sourcePlacementId: raw.sourcePlacementId }
       : {}),
+    ...(typeof raw.description === 'string' && raw.description.trim()
+      ? { description: raw.description.trim() }
+      : {}),
+    ...(() => {
+      const bounds = parseAuthoringBoundsFromDisk(raw.authoringBounds)
+      return bounds ? { authoringBounds: bounds } : {}
+    })(),
     ...(raw.visible === false ? { visible: false as const } : {}),
     ...(typeof raw.layerId === 'string' ? { layerId: raw.layerId } : {}),
     ...(attachments?.length ? { interactionAttachments: attachments } : {}),
+  }
+}
+
+export function parseEditorSettingsFromDoc(raw: Record<string, unknown>): EditorSettingsV2 {
+  const es = raw.editorSettings
+  if (!es || typeof es !== 'object' || Array.isArray(es)) return {}
+  const o = es as Record<string, unknown>
+  return {
+    ...(o.mcpAllowSceneEdition === true ? { mcpAllowSceneEdition: true } : {}),
   }
 }
 
@@ -197,6 +223,7 @@ export function parseAnyProjectFile(text: string): {
   nodes: EditorNode[]
   assets: ProjectAssetEntry[]
   assetFolders: string[]
+  editorSettings: EditorSettingsV2
 } {
   const raw = JSON.parse(text) as Record<string, unknown>
   if (!raw || raw.format !== 'igltf-editor-project') throw new Error('Invalid project file')
@@ -218,8 +245,16 @@ export function parseAnyProjectFile(text: string): {
       assets: doc.assets.map((a) => ({
         ...a,
         ...(a.logicalFolder ? { logicalFolder: normalizeLogicalFolder(a.logicalFolder) } : {}),
+        ...(typeof a.description === 'string' && a.description.trim()
+          ? { description: a.description.trim() }
+          : {}),
+        ...(() => {
+          const bounds = parseAuthoringBoundsFromDisk((a as Record<string, unknown>).authoringBounds)
+          return bounds ? { authoringBounds: bounds } : {}
+        })(),
       })),
       assetFolders,
+      editorSettings: parseEditorSettingsFromDoc(doc as unknown as Record<string, unknown>),
     }
   }
   if (raw.version === 1) {
@@ -232,7 +267,7 @@ export function parseAnyProjectFile(text: string): {
         scale: triple(o.scale as number[]),
       })
     })
-    return { nodes, assets: [], assetFolders: [] }
+    return { nodes, assets: [], assetFolders: [], editorSettings: {} }
   }
   throw new Error(`Unsupported project version: ${String(raw.version)}`)
 }

@@ -95,14 +95,49 @@ def ensure_project_mcp_json(project_id: str) -> None:
     write_project_mcp_json_if_absent(project_dir(project_id), get_public_base_url())
 
 
+def ensure_project_cursor_rules(project_id: str) -> None:
+    """Create .cursor/rules forbidding agent edits to project.json if missing."""
+
+    from app.cursor_project_rules import write_project_cursor_rule_if_absent
+
+    write_project_cursor_rule_if_absent(project_dir(project_id))
+
+
+def ensure_project_identity_file(project_id: str) -> None:
+    """Write `.igltf/project-id` in the workspace so MCP/IDE can resolve the hub UUID."""
+
+    from app.project_identity import write_project_identity_file
+
+    write_project_identity_file(project_dir(project_id), project_id)
+
+
 def ensure_project_layout(project_id: str) -> None:
     d = project_dir(project_id)
     d.mkdir(parents=True, exist_ok=True)
     assets_dir(project_id).mkdir(parents=True, exist_ok=True)
     staging_dir(project_id).mkdir(parents=True, exist_ok=True)
     ensure_project_mcp_json(project_id)
+    ensure_project_cursor_rules(project_id)
+    ensure_project_identity_file(project_id)
 
 
-def file_url(project_id: str, relative_path: str) -> str:
+def file_mtime_version(disk: Path) -> str:
+    """Nanosecond mtime for cache-busting play bundle URLs after rebuild."""
+    try:
+        return str(int(disk.stat().st_mtime_ns))
+    except OSError:
+        return "0"
+
+
+def is_play_bundle_relative_path(relative_path: str) -> bool:
+    """Built play artifacts and legacy root bundles should not be cached by clients."""
+    norm = relative_path.lstrip("/").replace("\\", "/")
+    return norm.startswith("build/") or norm in {"test.glb", "test.js"}
+
+
+def file_url(project_id: str, relative_path: str, *, version: str | None = None) -> str:
     rel = relative_path.lstrip("/").replace("\\", "/")
-    return f"{get_public_base_url()}/files/{project_id}/{rel}"
+    url = f"{get_public_base_url()}/files/{project_id}/{rel}"
+    if version:
+        url = f"{url}?v={version}"
+    return url

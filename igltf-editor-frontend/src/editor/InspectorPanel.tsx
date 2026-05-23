@@ -5,7 +5,7 @@ import {
   type IntrospectedField,
 } from '@/scriptRuntime/interactionIntrospection'
 import { eulerDegreesToRad, useEditor, vec3ToEulerDegrees } from './EditorContext'
-import { isScriptAssetEntry } from './assetUtils'
+import { assetDisplayLabel, isScriptAssetEntry } from './assetUtils'
 import { MIME_ASSET, dragOverLooksLikeAsset } from './dndTypes'
 import type { InteractionSerializedPropsMap, Vec3 } from './types'
 import './panels.css'
@@ -313,6 +313,18 @@ export function InspectorPanel() {
             />
             <span className="inspectorBoolLbl">Visible in viewport</span>
           </label>
+          <label className="inspectorFieldBlock">
+            <span className="inspectorFoldoutTitle">Description</span>
+            <textarea
+              className="inspectorDescriptionInput"
+              rows={3}
+              placeholder="Semantic hint for MCP / collaborators (not exported to Play glTF)"
+              value={node.description ?? ''}
+              onChange={(e) =>
+                updateNode(node.id, { description: e.target.value.trim() || undefined })
+              }
+            />
+          </label>
           <div className="inspectorFoldoutTitle">Transform</div>
           <VecField
             label="Position"
@@ -360,8 +372,9 @@ export function InspectorPanel() {
                 const interactionAsset = projectAssets.find((a) => a.assetId === att.scriptAssetRef)
                 const interactionExportName = interactionAsset?.scriptExports?.[0] ?? ''
                 const scriptSourceFingerprint = interactionAsset?.sourceText ?? ''
-                const assetLabel =
-                  interactionAsset?.name?.trim() || att.scriptAssetRef
+                const assetLabel = interactionAsset
+                  ? assetDisplayLabel(interactionAsset)
+                  : att.scriptAssetRef
                 return (
                   <details
                     key={att.id}

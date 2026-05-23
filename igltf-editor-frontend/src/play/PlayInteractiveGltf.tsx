@@ -47,6 +47,12 @@ export function PlayInteractiveGltf({ glbUrl, projectId, bundledScriptUrl, onMet
 
   useEffect(() => {
     return () => {
+      useGLTF.clear(glbUrl)
+    }
+  }, [glbUrl])
+
+  useEffect(() => {
+    return () => {
       clone.traverse((o) => {
         const maybeMesh = o as THREE.Mesh
         if (maybeMesh.geometry?.dispose) {

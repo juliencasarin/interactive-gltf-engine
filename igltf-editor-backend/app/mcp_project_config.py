@@ -27,7 +27,10 @@ def build_mcp_json_text(public_base_url: str | None = None) -> str:
         "mcpServers": {
             "interactive-gltf-framework": {
                 "url": endpoint,
-                "description": "Interactive glTF script authoring docs (listing + read of authoring_kit). Hosted by igltf-editor-backend; start backend before attaching in Cursor/Kilocode.",
+                "description": (
+                    "Interactive glTF authoring (authoring_kit docs + live scene MCP). "
+                    "Never edit project.json — use live session tools while igltf-editor is open."
+                ),
             },
         },
         "_generatedBy": "igltf-editor-backend",

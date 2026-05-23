@@ -1,11 +1,13 @@
 # Transform authoring (igltf-editor)
 
-UMI3D-aligned transform editing in the web editor. Persisted state is **always local TRS** plus `parentId` in `project.json`.
+MCP mirror of `docs/editor/transform-authoring.md` — sync from canonical when editing.
+
+UMI3D-aligned transform editing. Persisted state is **always local TRS** plus `parentId` in `project.json`.
 
 ## Inspector — Transform foldout
 
 - **Position / Rotation (°) / Scale** — local TRS only (`updateNode`).
-- No parent picker, reparent options, advanced rotate/relative, or glTF attach slot in the Inspector (those belong to hierarchy, assets workflow, or scripts).
+- No parent picker, reparent options, advanced rotate/relative, or glTF attach slot in the Inspector (hierarchy, assets workflow, or scripts).
 
 ## Hierarchy
 
@@ -33,4 +35,4 @@ Rotate-around, relative deltas, scale/quaternion setters, and imperative reparen
 
 ## Math module
 
-`igltf-editor-frontend/src/editor/transformMath.ts` — local/world conversion, reparent, rotate-around, relative deltas (used by gizmo apply path and available to script transactions). Unit tests in `transformMath.test.ts`.
+`igltf-editor-frontend/src/editor/transformMath.ts` — local/world conversion, reparent, rotate-around, relative deltas. Unit tests in `transformMath.test.ts`.

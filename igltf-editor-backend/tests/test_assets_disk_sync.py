@@ -11,7 +11,7 @@ import app.assets_disk_sync as ads
 import app.apply_document as appl
 import app.storage as storage
 from app.assets_watch import AssetsWatchHub
-from app.models import ProjectAsset, ProjectDocumentV2, Scene, SceneNode
+from app.models import EditorSettings, ProjectAsset, ProjectDocumentV2, Scene, SceneNode
 
 
 def _minimal_scene() -> Scene:
@@ -158,6 +158,26 @@ def test_apply_document_keeps_asset_after_prior_disk_sync(monkeypatch: pytest.Mo
     rel = doc.assets[0].relativePath.replace("\\", "/")
     assert rel == "assets/Dropped.js"
     assert Path(ws / rel).is_file()
+
+
+def test_apply_document_persists_editor_settings(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    ws = tmp_path / "proj-settings"
+    _bind_workspace(monkeypatch, ws)
+
+    doc = _minimal_doc()
+    (ws / "project.json").write_text(doc.model_dump_json(indent=2), encoding="utf-8")
+
+    with_settings = doc.model_copy(
+        update={"editorSettings": EditorSettings(mcpAllowSceneEdition=True)},
+    )
+    saved = appl.apply_and_persist_project("ignored", with_settings)
+
+    assert saved.editorSettings is not None
+    assert saved.editorSettings.mcpAllowSceneEdition is True
+
+    reloaded = ProjectDocumentV2.model_validate_json((ws / "project.json").read_text(encoding="utf-8"))
+    assert reloaded.editorSettings is not None
+    assert reloaded.editorSettings.mcpAllowSceneEdition is True
 
 
 def test_websocket_assets_watch_sends_hello(

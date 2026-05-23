@@ -1,6 +1,6 @@
 """Prototype glTF extension payload aligned loosely with UMI3D ``extensions.umi3d`` shape.
 
-Normative naming TBD in interactive-gltf-specs; see ``docs/umi3d-proto-extension-alignment.md``.
+Normative naming TBD in interactive-gltf-specs; see ``docs/editor/play-export.md``.
 """
 
 from __future__ import annotations

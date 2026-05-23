@@ -15,10 +15,64 @@ class InteractionScriptAttachment(BaseModel):
     model_config = {"extra": "ignore"}
 
 
+class AuthoringBoundsAabb(BaseModel):
+    min: list[float]
+    max: list[float]
+    center: list[float]
+    size: list[float]
+
+    @field_validator("min", "max", "center", "size")
+    @classmethod
+    def _len3_aabb(cls, v: list[float]) -> list[float]:
+        if len(v) != 3:
+            raise ValueError("expected exactly 3 floats")
+        return v
+
+    model_config = {"extra": "ignore"}
+
+
+class AuthoringBoundsSphere(BaseModel):
+    center: list[float]
+    radius: float
+
+    @field_validator("center")
+    @classmethod
+    def _len3_sphere(cls, v: list[float]) -> list[float]:
+        if len(v) != 3:
+            raise ValueError("expected exactly 3 floats")
+        return v
+
+    model_config = {"extra": "ignore"}
+
+
+class AuthoringBoundsMetadata(BaseModel):
+    """Editor-only measured bounds (AABB + sphere) for scale / collision tooling."""
+
+    space: Literal["local", "world"]
+    aabb: AuthoringBoundsAabb
+    sphere: AuthoringBoundsSphere
+    measuredAt: str | None = None
+
+    model_config = {"extra": "ignore"}
+
+
+class EditorSettings(BaseModel):
+    """Editor-only project settings (not exported to Play glTF)."""
+
+    mcpAllowSceneEdition: bool | None = Field(
+        default=None,
+        description="When true, MCP clients may mutate the live scene via editor session.",
+    )
+
+    model_config = {"extra": "ignore"}
+
+
 class ProjectAsset(BaseModel):
     assetId: str
     relativePath: str
     name: str | None = None
+    description: str | None = None
+    authoringBounds: AuthoringBoundsMetadata | None = None
     logicalFolder: str | None = None
     assetKind: Literal["gltf", "script"] | None = None
     scriptRole: Literal["interaction", "behaviour"] | None = None
@@ -35,6 +89,8 @@ class ProjectAsset(BaseModel):
 class SceneNode(BaseModel):
     id: str
     name: str
+    description: str | None = None
+    authoringBounds: AuthoringBoundsMetadata | None = None
     parentId: str | None = None
     position: list[float]
     rotation: list[float]
@@ -85,6 +141,7 @@ class ProjectDocumentV2(BaseModel):
     scene: Scene
     assets: list[ProjectAsset] = Field(default_factory=list)
     assetFolders: list[str] = Field(default_factory=list)
+    editorSettings: EditorSettings | None = None
 
     model_config = {"extra": "ignore"}
 

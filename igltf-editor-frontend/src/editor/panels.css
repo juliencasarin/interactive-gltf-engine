@@ -27,9 +27,57 @@
   margin: 0;
 }
 
-.inspectorHintMuted {
-  color: rgb(142, 142, 142);
-  margin-top: 8px;
+.inspectorDescriptionInput {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 4px;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 12px;
+  color: rgb(230, 230, 230);
+  background: rgb(35, 35, 35);
+  border: 1px solid rgb(94, 94, 94);
+  border-radius: 3px;
+  resize: vertical;
+  min-height: 48px;
+}
+
+.inspectorFieldBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.settingsMenuDropdown {
+  padding-top: 8px;
+  padding-bottom: 10px;
+}
+
+.settingsMenuSectionTitle {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgb(160, 160, 160);
+  padding: 4px 12px 6px;
+}
+
+.settingsMenuRow {
+  padding: 4px 12px;
+}
+
+.settingsMenuHint {
+  padding: 0 12px;
+  line-height: 1.35;
+}
+
+.settingsMenuHintWarn {
+  color: var(--igltf-warn-fg, #b45309);
+}
+
+.settingsMenuMono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.92em;
 }
 
 .inspectorFoldout {

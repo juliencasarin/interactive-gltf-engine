@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { isApiConfigured, isOpenIdeEnabled, postBuildPlayGlb } from '@/api/projectApi'
 import { FileMenu } from '@/editor/FileMenu'
+import { SettingsMenu } from '@/editor/SettingsMenu'
 import { OpenInIdeButton } from '@/editor/OpenInIdeButton'
 import { useEditor } from '@/editor/EditorContext'
 import { EditorToolsBar } from '@/editor/EditorToolsBar'
@@ -13,12 +14,6 @@ import './editor-shell.css'
 
 function clamp(n: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, n))
-}
-
-function initialProjectPath(sceneId: string): string {
-  const base = import.meta.env?.BASE_URL ?? '/'
-  const normalized = base.endsWith('/') ? base.slice(0, -1) : base
-  return `${normalized || ''}/projects/${sceneId}`
 }
 
 const GLTF_EXT = /\.(glb|gltf)$/i
@@ -38,8 +33,8 @@ export type EditorShellProps = {
 
 export function EditorShell({ sceneId }: EditorShellProps) {
   const navigate = useNavigate()
-  const { dirty, addGltfFromFile, setPanelFocus, loadError, saveProjectToServer } = useEditor()
-  const projectPath = initialProjectPath(sceneId)
+  const { dirty, addGltfFromFile, setPanelFocus, loadError, saveProjectToServer, projectDiskPath } = useEditor()
+  const projectPathLabel = projectDiskPath ?? sceneId
   const [buildModalOpen, setBuildModalOpen] = useState(false)
   const [building, setBuilding] = useState(false)
   const mainDisplayRef = useRef<HTMLDivElement>(null)
@@ -248,9 +243,12 @@ export function EditorShell({ sceneId }: EditorShellProps) {
           <div className="fileMenuToolbarSlot">
             <FileMenu projectBasename={sceneId} />
           </div>
+          <div className="fileMenuToolbarSlot">
+            <SettingsMenu />
+          </div>
           {isOpenIdeEnabled() ? <OpenInIdeButton projectId={sceneId} /> : null}
-          <span className="projectPath" title={projectPath}>
-            {projectPath}
+          <span className="projectPath" title={projectPathLabel}>
+            {projectPathLabel}
             {dirty ? ' *' : ''}
           </span>
         </div>
