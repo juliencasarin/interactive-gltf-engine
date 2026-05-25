@@ -87,7 +87,7 @@ Or resolve on demand inside `onEvent` / `onUpdate`. Use **`kind: "node"`** when 
 
 ## Inspector
 
-The Inspector shows typed fields per kind: drop zones plus catalog **select** lists for node / script / glTF asset, nested object sub-form for `object`. Validation matches export and MCP tools.
+The Inspector shows typed fields on **one row** (label + value). Ref kinds (`node`, `script`, `gltfAsset`, `scriptAttachment`) use a **read-only** value cell: assign by **drag-and-drop** only, with a light **✕** to clear. A **dropdown appears only when ambiguous** — e.g. dropping a hierarchy node with several matching `scriptAttachment` candidates. Nested `object` sub-fields use the same single-line layout. Validation matches export and MCP tools.
 
 ## Export
 
