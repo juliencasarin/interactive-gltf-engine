@@ -38,6 +38,65 @@ export function registerIgltfHostExtraLibs(): void {
     noSyntaxValidation: false,
     noSuggestionDiagnostics: true,
   })
+
+  monaco.languages.registerCompletionItemProvider('javascript', {
+    provideCompletionItems(model, position) {
+      const word = model.getWordUntilPosition(position)
+      const range = {
+        startLineNumber: position.lineNumber,
+        endLineNumber: position.lineNumber,
+        startColumn: word.startColumn,
+        endColumn: word.endColumn,
+      }
+      return {
+        suggestions: [
+          {
+            label: 'igltfInput-node',
+            kind: monaco.languages.CompletionItemKind.Snippet,
+            insertText: '/** @igltfInput { "kind": "node" } */\n${1:fieldName} = null',
+            insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+            documentation: 'Authoring input: scene node reference (stored as IgltfNodeInputRef JSON).',
+            range,
+          },
+          {
+            label: 'igltfInput-script',
+            kind: monaco.languages.CompletionItemKind.Snippet,
+            insertText:
+              '/** @igltfInput { "kind": "script", "exportName": "${1:ClassName}" } */\n${2:fieldName} = \'\'',
+            insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+            documentation: 'Authoring input: script catalog asset reference.',
+            range,
+          },
+          {
+            label: 'igltfInput-scriptAttachment',
+            kind: monaco.languages.CompletionItemKind.Snippet,
+            insertText:
+              '/** @igltfInput { "kind": "scriptAttachment", "exportName": "${1:RotateWheel}" } */\n${2:fieldName} = null',
+            insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+            documentation: 'Authoring input: script attachment on a scene node (resolve via GLTF.getScriptByAttachmentId).',
+            range,
+          },
+          {
+            label: 'igltfInput-gltfAsset',
+            kind: monaco.languages.CompletionItemKind.Snippet,
+            insertText: '/** @igltfInput { "kind": "gltfAsset" } */\n${1:fieldName} = \'\'',
+            insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+            documentation: 'Authoring input: glTF catalog asset reference.',
+            range,
+          },
+          {
+            label: 'igltfInput-object',
+            kind: monaco.languages.CompletionItemKind.Snippet,
+            insertText:
+              '/** @igltfInput { "kind": "object", "fields": { "${1:speed}": { "kind": "number" } } } */\n${2:fieldName} = { ${1:speed}: 1 }',
+            insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+            documentation: 'Authoring input: nested object with typed sub-fields.',
+            range,
+          },
+        ],
+      }
+    },
+  })
 }
 
 /** Default interaction script: kind base → Interaction → GlTFScript. */
@@ -50,6 +109,10 @@ export class ExampleInteraction extends EventInteraction {
 
   onLoaded() {
     // TODO: runs once when the script instance is attached in Play.
+  }
+
+  afterLoading() {
+    // TODO: optional — all instances ready; resolve @igltfInput node refs via GLTF.getObjectByUmi3dId.
   }
 
   onUpdate(delta) {
@@ -80,6 +143,10 @@ export class ExampleBehaviour extends GlTFScript {
 
   onLoaded() {
     // TODO: runs once when attached to a scene node in Play.
+  }
+
+  afterLoading() {
+    // TODO: optional cross-script init after all onLoaded hooks.
   }
 
   onUpdate(delta) {

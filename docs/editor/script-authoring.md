@@ -77,10 +77,17 @@ Export a **`class`** whose name matches **`scriptExports[0]`** and the file stem
 | Hook | When |
 |------|------|
 | `onLoaded()` | After instance creation; `serializedProps` merged (incl. `targetId`) |
+| `afterLoading()` | After all script instances exist and async `onLoaded` hooks settled; cross-script wiring |
 | `onUpdate(delta)` | Each frame (`delta` seconds, R3F `useFrame`) |
 | `onDelete()` | Scene unmount / reload |
 
 One instance per proto **`attachmentId`**. Handlers reuse that instance — not `new` per click.
+
+## Script inputs (`@igltfInput`)
+
+Public fields can be annotated for typed Inspector fields and portable JSON refs in `serializedProps`. See **[script-inputs.md](script-inputs.md)** for JSDoc syntax, stored ref shapes, export remapping, and **`afterLoading()`** for cross-script resolution via `GLTF.getObjectByUmi3dId`.
+
+MCP agents: **[script-inputs-mcp.md](script-inputs-mcp.md)** (`igltf_introspect_script_inputs`, `igltf_set_script_inputs`).
 
 ## Interaction kind → handler
 

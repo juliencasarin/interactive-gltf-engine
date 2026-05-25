@@ -120,17 +120,36 @@ export function useEditorSessionWs(opts: UseEditorSessionOptions): EditorSession
             return
           }
 
-          const result = dispatchEditorMcpCommand(msg.op, msg.params ?? {}, handlersRef.current)
-          ws.send(
-            JSON.stringify({
-              type: 'command_result',
-              requestId: msg.requestId,
-              ok: result.ok,
-              revision: result.ok ? result.revision : revisionRef.current,
-              error: result.ok ? undefined : result.error,
-              result: result.ok ? result.result : undefined,
-            }),
-          )
+          void (async () => {
+            try {
+              const result = await Promise.resolve(
+                dispatchEditorMcpCommand(msg.op!, msg.params ?? {}, handlersRef.current),
+              )
+              ws.send(
+                JSON.stringify({
+                  type: 'command_result',
+                  requestId: msg.requestId,
+                  ok: result.ok,
+                  revision: result.ok ? result.revision : revisionRef.current,
+                  error: result.ok ? undefined : result.error,
+                  result: result.ok ? result.result : undefined,
+                }),
+              )
+            } catch (e) {
+              ws.send(
+                JSON.stringify({
+                  type: 'command_result',
+                  requestId: msg.requestId,
+                  ok: false,
+                  revision: revisionRef.current,
+                  error: {
+                    code: 'command_failed',
+                    message: e instanceof Error ? e.message : 'Command failed',
+                  },
+                }),
+              )
+            }
+          })()
         } catch {
           /* ignore */
         }

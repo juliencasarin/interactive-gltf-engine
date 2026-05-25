@@ -1,4 +1,5 @@
 import { isGltfAssetEntry, isScriptAssetEntry } from './assetUtils'
+import { handleSetScriptInputs } from './mcpSetScriptInputs'
 import { safeInteractionSerializedProps } from './projectIo'
 import { setTransformInSpace, type TransformSpace } from './transformMath'
 import type { AuthoringBoundsMetadata, EditorNode, InteractionSerializedPropsMap, ProjectAssetEntry, Vec3 } from './types'
@@ -21,6 +22,7 @@ export const SCENE_MUTATION_COMMANDS = new Set([
   'add_script_attachment',
   'remove_script_attachment',
   'update_script_attachment',
+  'set_script_inputs',
 ])
 
 /** True when the command mutates project/scene state (not pure viewport measure). */
@@ -93,6 +95,7 @@ export type EditorMcpCommandHandlers = {
   ) => void
   measureSceneNodeBounds: (nodeId: string, space: 'local' | 'world') => AuthoringBoundsMetadata | null
   measureAssetBounds: (assetId: string) => AuthoringBoundsMetadata | null
+  fetchScriptSource: (assetId: string) => Promise<string>
 }
 
 function fail(code: string, message: string): EditorMcpCommandResult {
@@ -118,7 +121,11 @@ export function dispatchEditorMcpCommand(
   op: string,
   params: Record<string, unknown>,
   handlers: EditorMcpCommandHandlers,
-): EditorMcpCommandResult {
+): EditorMcpCommandResult | Promise<EditorMcpCommandResult> {
+  if (op === 'set_script_inputs') {
+    return handleSetScriptInputs(params, handlers)
+  }
+
   switch (op) {
     case 'set_node_transform': {
       const nodeId = typeof params.nodeId === 'string' ? params.nodeId : ''

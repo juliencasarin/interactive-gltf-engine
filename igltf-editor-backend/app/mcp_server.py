@@ -13,7 +13,9 @@ from app.mcp_scene_tools import (
     igltf_get_descriptions,
     igltf_get_editor_session_status,
     igltf_get_node_details,
+    igltf_get_script_attachment_inputs,
     igltf_instantiate_asset,
+    igltf_introspect_script_inputs,
     igltf_list_assets,
     igltf_list_registered_projects,
     igltf_list_scene_hierarchy,
@@ -26,6 +28,7 @@ from app.mcp_scene_tools import (
     igltf_set_description,
     igltf_set_node_transform,
     igltf_set_node_visibility,
+    igltf_set_script_inputs,
     igltf_update_script_on_node,
 )
 from app.version_info import ENGINE_VERSION
@@ -144,6 +147,30 @@ def mcp_get_node_details(project_id: str, node_id: str) -> dict[str, object]:
     """Full details for one scene node from the live session."""
 
     return igltf_get_node_details(project_id, node_id)
+
+
+@framework_fast_mcp.tool(name="igltf_introspect_script_inputs")
+def mcp_introspect_script_inputs(project_id: str, script_asset_id: str) -> dict[str, object]:
+    """
+    Parse @igltfInput JSDoc on a script catalog asset (read-only).
+    Returns field schema: inputKind, inputDef per annotated public field.
+    """
+
+    return igltf_introspect_script_inputs(project_id, script_asset_id)
+
+
+@framework_fast_mcp.tool(name="igltf_get_script_attachment_inputs")
+def mcp_get_script_attachment_inputs(
+    project_id: str,
+    node_id: str,
+    attachment_id: str,
+) -> dict[str, object]:
+    """
+    Schema + current serializedProps for one script attachment on a scene node (read-only).
+    Includes displayLabel for node/script/gltfAsset refs from live session names.
+    """
+
+    return igltf_get_script_attachment_inputs(project_id, node_id, attachment_id)
 
 
 @framework_fast_mcp.tool(name="igltf_get_bounds_metadata")
@@ -292,7 +319,10 @@ async def mcp_update_script_on_node(
     serialized_props: dict[str, object] | None = None,
     script_asset_id: str | None = None,
 ) -> dict[str, object]:
-    """Update serializedProps and/or script asset on an existing attachment."""
+    """
+    Update serializedProps and/or script asset on an existing attachment.
+    Deprecated for @igltfInput annotated fields — use igltf_set_script_inputs instead.
+    """
 
     return await igltf_update_script_on_node(
         project_id,
@@ -301,6 +331,22 @@ async def mcp_update_script_on_node(
         serialized_props=serialized_props,
         script_asset_id=script_asset_id,
     )
+
+
+@framework_fast_mcp.tool(name="igltf_set_script_inputs")
+async def mcp_set_script_inputs(
+    project_id: str,
+    node_id: str,
+    attachment_id: str,
+    inputs: list[dict[str, object]],
+) -> dict[str, object]:
+    """
+    Set @igltfInput fields on a script attachment with semantic validation.
+    Each input: { "field": "doorTarget", "value": { "nodeId": "…" } } (or scalar / nested object).
+    Requires canMutateScene. Do not hand-patch annotated serializedProps via igltf_update_script_on_node.
+    """
+
+    return await igltf_set_script_inputs(project_id, node_id, attachment_id, inputs)
 
 
 def prime_mcp_mount_handler() -> StreamableHTTPASGIApp:

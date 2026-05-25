@@ -30,6 +30,7 @@ Until then, Play logic lives in `igltf-editor-frontend` (`PlayInteractiveGltf.ts
 - Visual interaction graph, debugging, live reload
 - Layer UI for `layerId`
 - Script dependency graph editor for `scriptDependsOnAssetIds`
+- **Advanced script inputs** (`scripting/feature-advanced-scripts-inputs`) — script introspection and inspector support for parameter types **`script`** (catalog script asset reference) and **`object`** (nested structured fields); export via `serializedProps` / Play payload; sync portable format with **interactive-gltf-specs** [`proposal-interactive-gltf-javascript-scripts.md`](https://github.com/UMI3D/interactive-gltf-specs/blob/main/proposals/proposal-interactive-gltf-javascript-scripts.md)
 - Inspector control for authoring bounds measurement
 - MCP: interior expand/collapse, script file creation
 - Richer import pipeline (formats beyond glTF-first)

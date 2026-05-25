@@ -12,7 +12,7 @@ import { assetDisplayLabel, catalogAssetStem, isGltfAssetEntry, isScriptAssetEnt
 import { MIME_ASSET, dragOverLooksLikeAsset } from './dndTypes'
 import { isApiConfigured, renameScriptStem } from '@/api/projectApi'
 import { ScriptAssetEditor } from './ScriptAssetEditor'
-import type { ScriptRole, ProjectAssetEntry } from './types'
+import type { ScriptRole } from './types'
 import './panels.css'
 
 function fileExtensionLabel(relativePath: string): string {

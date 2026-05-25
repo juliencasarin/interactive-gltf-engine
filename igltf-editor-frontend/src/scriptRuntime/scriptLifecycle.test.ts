@@ -65,10 +65,10 @@ function nodesWithAttachment(
 }
 
 describe('ScriptInstanceManager', () => {
-  it('calls onLoaded once at bootstrap, onUpdate on tick, onDelete on destroy', () => {
+  it('calls onLoaded once at bootstrap, onUpdate on tick, onDelete on destroy', async () => {
     const manager = new ScriptInstanceManager()
     manager.registerClass('TestEventInteraction', TestEventInteractionCtor, 'event')
-    manager.bootstrap(nodesWithAttachment('att-1', 'TestEventInteraction', { targetId: '42' }))
+    await manager.bootstrap(nodesWithAttachment('att-1', 'TestEventInteraction', { targetId: '42' }))
 
     const inst = manager.getInstance('att-1') as unknown as TestEventInteraction
     expect(inst).toBeDefined()
@@ -85,10 +85,10 @@ describe('ScriptInstanceManager', () => {
     expect(manager.getInstance('att-1')).toBeUndefined()
   })
 
-  it('reuses the same instance for handler invocation', () => {
+  it('reuses the same instance for handler invocation', async () => {
     const manager = new ScriptInstanceManager()
     manager.registerClass('TestEventInteraction', TestEventInteractionCtor, 'event')
-    manager.bootstrap(nodesWithAttachment('att-1', 'TestEventInteraction'))
+    await manager.bootstrap(nodesWithAttachment('att-1', 'TestEventInteraction'))
 
     const instBefore = manager.getInstance('att-1')
     manager.invokeOnAttachment('att-1', { eventType: 'click' })
@@ -101,11 +101,11 @@ describe('ScriptInstanceManager', () => {
     expect(inst.lastPayload?.eventType).toBe('click')
   })
 
-  it('forwards hook return values to onHookResult', () => {
+  it('forwards hook return values to onHookResult', async () => {
     const seen: unknown[] = []
     const manager = new ScriptInstanceManager((result) => seen.push(result))
     manager.registerClass('TestEventInteraction', TestEventInteractionCtor, 'event')
-    manager.bootstrap(nodesWithAttachment('att-1', 'TestEventInteraction'))
+    await manager.bootstrap(nodesWithAttachment('att-1', 'TestEventInteraction'))
     manager.tick(0.01)
     manager.invokeOnAttachment('att-1', { eventType: 'click' })
 
@@ -113,5 +113,24 @@ describe('ScriptInstanceManager', () => {
     expect(seen.some((r) => typeof r === 'object' && r !== null && (r as { version?: number }).version === 1)).toBe(
       true,
     )
+  })
+
+  it('calls afterLoading after all onLoaded hooks including async', async () => {
+    class AsyncLoad {
+      order: string[] = []
+      async onLoaded() {
+        await Promise.resolve()
+        this.order.push('loaded')
+      }
+      afterLoading() {
+        this.order.push('after')
+      }
+    }
+    const Ctor = AsyncLoad as unknown as new () => Record<string, unknown>
+    const manager = new ScriptInstanceManager()
+    manager.registerClass('AsyncLoad', Ctor, 'event')
+    await manager.bootstrap(nodesWithAttachment('att-1', 'AsyncLoad'))
+    const inst = manager.getInstance('att-1') as unknown as AsyncLoad
+    expect(inst.order).toEqual(['loaded', 'after'])
   })
 })

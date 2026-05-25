@@ -134,9 +134,31 @@ export class ScriptInstanceManager {
     }
   }
 
-  bootstrap(nodes: GltfJson['nodes']): void {
+  private invokeHook(inst: Record<string, unknown>, methodName: string, ...args: unknown[]): unknown {
+    const fn = inst[methodName]
+    if (typeof fn !== 'function') return undefined
+    return (fn as (...a: unknown[]) => unknown).call(inst, ...args)
+  }
+
+  private async settleHook(result: unknown): Promise<void> {
+    if (result instanceof Promise) {
+      const resolved = await result
+      if (resolved !== undefined && resolved !== null) {
+        this.onHookResult?.(resolved)
+      }
+      return
+    }
+    if (result !== undefined && result !== null) {
+      this.onHookResult?.(result)
+    }
+  }
+
+  async bootstrap(nodes: GltfJson['nodes']): Promise<void> {
     this.destroy()
-    for (const desc of collectProtoAttachments(nodes)) {
+    const descriptors = collectProtoAttachments(nodes)
+    const pending: { attachmentId: string; inst: Record<string, unknown> }[] = []
+
+    for (const desc of descriptors) {
       const exp = this.classExports.get(desc.scriptHandlerId)
       if (!exp) {
         console.warn('[igltf play] no class export for attachment', desc.attachmentId, desc.scriptHandlerId)
@@ -144,12 +166,19 @@ export class ScriptInstanceManager {
       }
       const inst = new exp.Cls()
       mergeInstanceProps(inst, desc.serializedProps)
-      const onLoaded = inst.onLoaded
-      if (typeof onLoaded === 'function') {
-        this.emitHookResult((onLoaded as () => unknown).call(inst))
-      }
       this.instances.set(desc.attachmentId, inst)
       this.attachmentMeta.set(desc.attachmentId, desc)
+      pending.push({ attachmentId: desc.attachmentId, inst })
+    }
+
+    await Promise.all(
+      pending.map(async ({ inst }) => {
+        await this.settleHook(this.invokeHook(inst, 'onLoaded'))
+      }),
+    )
+
+    for (const { inst } of pending) {
+      await this.settleHook(this.invokeHook(inst, 'afterLoading'))
     }
   }
 

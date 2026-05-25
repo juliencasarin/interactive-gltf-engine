@@ -460,7 +460,255 @@ async def igltf_update_script_on_node(
         params["serializedProps"] = serialized_props
     if script_asset_id is not None:
         params["scriptAssetId"] = script_asset_id
-    return await _dispatch(project_id, "update_script_attachment", params)
+
+    warning: str | None = None
+    if serialized_props:
+        snap = _require_live(project_id)
+        if "error" not in snap:
+            warning = _deprecated_annotated_props_warning(
+                project_id, snap, node_id, attachment_id, serialized_props
+            )
+
+    result = await _dispatch(project_id, "update_script_attachment", params)
+    if warning and "error" not in result:
+        result["warning"] = warning
+    return result
+
+
+def _snapshot_node_ids(snapshot: dict[str, Any]) -> set[str]:
+    scene = snapshot.get("scene")
+    if not isinstance(scene, dict):
+        return set()
+    nodes = scene.get("nodes")
+    if not isinstance(nodes, list):
+        return set()
+    return {n["id"] for n in nodes if isinstance(n, dict) and isinstance(n.get("id"), str)}
+
+
+def _snapshot_assets(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    assets = snapshot.get("assets")
+    if not isinstance(assets, list):
+        return []
+    return [a for a in assets if isinstance(a, dict)]
+
+
+def _snapshot_node_names(snapshot: dict[str, Any]) -> dict[str, str]:
+    scene = snapshot.get("scene")
+    if not isinstance(scene, dict) or not isinstance(scene.get("nodes"), list):
+        return {}
+    out: dict[str, str] = {}
+    for raw in scene["nodes"]:
+        if not isinstance(raw, dict):
+            continue
+        nid = raw.get("id")
+        if isinstance(nid, str):
+            name = raw.get("name")
+            out[nid] = name if isinstance(name, str) and name.strip() else nid
+    return out
+
+
+def _snapshot_asset_names(snapshot: dict[str, Any]) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for raw in _snapshot_assets(snapshot):
+        aid = raw.get("assetId")
+        if not isinstance(aid, str):
+            continue
+        name = raw.get("name") or raw.get("relativePath")
+        out[aid] = name if isinstance(name, str) and name.strip() else aid
+    return out
+
+
+def _find_attachment(
+    snapshot: dict[str, Any], node_id: str, attachment_id: str
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    scene = snapshot.get("scene")
+    if not isinstance(scene, dict) or not isinstance(scene.get("nodes"), list):
+        return None, None
+    for raw in scene["nodes"]:
+        if not isinstance(raw, dict) or raw.get("id") != node_id:
+            continue
+        atts = raw.get("interactionAttachments")
+        if not isinstance(atts, list):
+            return raw, None
+        for att in atts:
+            if isinstance(att, dict) and att.get("id") == attachment_id:
+                return raw, att
+        return raw, None
+    return None, None
+
+
+def _deprecated_annotated_props_warning(
+    project_id: str,
+    snapshot: dict[str, Any],
+    node_id: str,
+    attachment_id: str,
+    serialized_props: dict[str, Any],
+) -> str | None:
+    from app.script_input_schema import parse_igltf_input_annotations, read_script_asset_source, script_export_name
+
+    _, att = _find_attachment(snapshot, node_id, attachment_id)
+    if not att:
+        return None
+    script_asset_id = att.get("scriptAssetRef")
+    if not isinstance(script_asset_id, str):
+        return None
+    source, asset, err = read_script_asset_source(project_id, script_asset_id, snapshot)
+    if err or not source or not asset:
+        return None
+    export_name = script_export_name(asset)
+    if not export_name:
+        return None
+    annotations = parse_igltf_input_annotations(source, export_name)
+    bad = [k for k in serialized_props if k in annotations and k != "targetId"]
+    if not bad:
+        return None
+    return (
+        "Use igltf_set_script_inputs for @igltfInput fields (deprecated raw serializedProps): "
+        + ", ".join(sorted(bad))
+    )
+
+
+def _introspect_script_fields(
+    project_id: str, script_asset_id: str, snapshot: dict[str, Any]
+) -> dict[str, Any]:
+    from app.script_input_schema import (
+        annotation_to_mcp_field,
+        parse_igltf_input_annotations,
+        read_script_asset_source,
+        script_export_name,
+    )
+
+    source, asset, err = read_script_asset_source(project_id, script_asset_id, snapshot)
+    if err or not source or not asset:
+        return {"error": {"code": "script_source_unavailable", "message": err or "Script source unavailable"}}
+    export_name = script_export_name(asset)
+    if not export_name:
+        return {
+            "error": {
+                "code": "script_export_missing",
+                "message": f"Script asset {script_asset_id!r} has no scriptExports[0]",
+            }
+        }
+    annotations = parse_igltf_input_annotations(source, export_name)
+    fields = [annotation_to_mcp_field(name, defn) for name, defn in sorted(annotations.items())]
+    return {
+        "scriptAssetId": script_asset_id,
+        "exportName": export_name,
+        "fields": fields,
+    }
+
+
+def igltf_introspect_script_inputs(project_id: str, script_asset_id: str) -> dict[str, Any]:
+    snap = _require_live(project_id)
+    if "error" in snap:
+        return snap
+    payload = _introspect_script_fields(project_id, script_asset_id, snap)
+    if "error" in payload:
+        return payload
+    return _with_session_capabilities(project_id, {"projectId": project_id, **payload})
+
+
+def igltf_get_script_attachment_inputs(
+    project_id: str,
+    node_id: str,
+    attachment_id: str,
+) -> dict[str, Any]:
+    from app.script_input_schema import _asset_by_id, format_stored_for_display
+
+    snap = _require_live(project_id)
+    if "error" in snap:
+        return snap
+
+    _, att = _find_attachment(snap, node_id, attachment_id)
+    if att is None:
+        return {"error": {"code": "attachment_not_found", "message": f"Attachment {attachment_id!r} not found on node {node_id!r}"}}
+
+    script_asset_id = att.get("scriptAssetRef")
+    if not isinstance(script_asset_id, str):
+        return {"error": {"code": "invalid_attachment", "message": "Attachment has no scriptAssetRef"}}
+
+    intro = _introspect_script_fields(project_id, script_asset_id, snap)
+    if "error" in intro:
+        return intro
+
+    props = att.get("serializedProps") if isinstance(att.get("serializedProps"), dict) else {}
+    node_names = _snapshot_node_names(snap)
+    asset_names = _snapshot_asset_names(snap)
+
+    def attachment_label(node_id: str, attachment_id: str) -> str:
+        scene = snap.get("scene")
+        if not isinstance(scene, dict) or not isinstance(scene.get("nodes"), list):
+            return f"{node_id} / {attachment_id}"
+        for raw in scene["nodes"]:
+            if not isinstance(raw, dict) or raw.get("id") != node_id:
+                continue
+            atts = raw.get("interactionAttachments")
+            if not isinstance(atts, list):
+                break
+            for att in atts:
+                if not isinstance(att, dict) or att.get("id") != attachment_id:
+                    continue
+                node_name = raw.get("name") if isinstance(raw.get("name"), str) else node_id
+                script_ref = att.get("scriptAssetRef")
+                export = attachment_id
+                if isinstance(script_ref, str):
+                    asset = _asset_by_id(_snapshot_assets(snap), script_ref)
+                    exports = asset.get("scriptExports") if asset else None
+                    if isinstance(exports, list) and exports and isinstance(exports[0], str):
+                        export = exports[0]
+                    else:
+                        export = asset_names.get(script_ref, script_ref)
+                return f"{node_name} / {export}"
+        return f"{node_names.get(node_id, node_id)} / {attachment_id}"
+
+    field_rows: list[dict[str, Any]] = []
+    for row in intro.get("fields", []):
+        if not isinstance(row, dict):
+            continue
+        field = row.get("field")
+        if not isinstance(field, str):
+            continue
+        defn = row.get("inputDef") if isinstance(row.get("inputDef"), dict) else {}
+        stored = props.get(field)
+        field_rows.append(
+            {
+                **row,
+                "storedValue": stored,
+                "displayLabel": format_stored_for_display(
+                    defn,
+                    stored,
+                    node_name=lambda nid: node_names.get(nid, nid),
+                    asset_name=lambda aid: asset_names.get(aid, aid),
+                    attachment_label=attachment_label,
+                ),
+            }
+        )
+
+    return _with_session_capabilities(
+        project_id,
+        {
+            "projectId": project_id,
+            "nodeId": node_id,
+            "attachmentId": attachment_id,
+            "scriptAssetId": script_asset_id,
+            "exportName": intro.get("exportName"),
+            "fields": field_rows,
+            "serializedProps": props,
+        },
+    )
+
+
+async def igltf_set_script_inputs(
+    project_id: str,
+    node_id: str,
+    attachment_id: str,
+    inputs: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if not isinstance(inputs, list) or not inputs:
+        return {"error": {"code": "invalid_argument", "message": "inputs must be a non-empty array"}}
+
+    params: dict[str, Any] = {"nodeId": node_id, "attachmentId": attachment_id, "inputs": inputs}
+    return await _dispatch(project_id, "set_script_inputs", params)
 
 
 def igltf_get_bounds_metadata(

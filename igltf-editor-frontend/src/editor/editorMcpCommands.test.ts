@@ -57,47 +57,54 @@ function makeHandlers(overrides: Partial<EditorMcpCommandHandlers> = {}): Editor
     updateInteractionAttachment: vi.fn(),
     measureSceneNodeBounds: vi.fn(() => sampleBounds),
     measureAssetBounds: vi.fn(() => null),
+    fetchScriptSource: vi.fn(async () => ''),
     ...overrides,
   }
 }
 
 describe('dispatchEditorMcpCommand', () => {
-  it('rename_node calls updateNode', () => {
+  it('rename_node calls updateNode', async () => {
     const h = makeHandlers()
-    const res = dispatchEditorMcpCommand('rename_node', { nodeId: 'n1', name: 'Renamed' }, h)
+    const res = await Promise.resolve(dispatchEditorMcpCommand('rename_node', { nodeId: 'n1', name: 'Renamed' }, h))
     expect(res.ok).toBe(true)
     if (res.ok) expect(res.revision).toBe(5)
     expect(h.updateNode).toHaveBeenCalledWith('n1', { name: 'Renamed' })
   })
 
-  it('set_description on asset uses updateProjectAsset', () => {
+  it('set_description on asset uses updateProjectAsset', async () => {
     const h = makeHandlers()
-    const res = dispatchEditorMcpCommand(
-      'set_description',
-      { target: 'asset', id: 'script1', description: 'Teleport script' },
-      h,
+    const res = await Promise.resolve(
+      dispatchEditorMcpCommand(
+        'set_description',
+        { target: 'asset', id: 'script1', description: 'Teleport script' },
+        h,
+      ),
     )
     expect(res.ok).toBe(true)
     expect(h.updateProjectAsset).toHaveBeenCalledWith('script1', { description: 'Teleport script' })
   })
 
-  it('add_script_attachment validates script asset', () => {
+  it('add_script_attachment validates script asset', async () => {
     const h = makeHandlers()
-    const bad = dispatchEditorMcpCommand(
-      'add_script_attachment',
-      { nodeId: 'n1', scriptAssetId: 'missing' },
-      h,
+    const bad = await Promise.resolve(
+      dispatchEditorMcpCommand(
+        'add_script_attachment',
+        { nodeId: 'n1', scriptAssetId: 'missing' },
+        h,
+      ),
     )
     expect(bad.ok).toBe(false)
     if (!bad.ok) expect(bad.error.code).toBe('asset_not_found')
   })
 
-  it('measure_scene_node_bounds persists when requested', () => {
+  it('measure_scene_node_bounds persists when requested', async () => {
     const h = makeHandlers()
-    const res = dispatchEditorMcpCommand(
-      'measure_scene_node_bounds',
-      { nodeId: 'n1', space: 'world', persist: true },
-      h,
+    const res = await Promise.resolve(
+      dispatchEditorMcpCommand(
+        'measure_scene_node_bounds',
+        { nodeId: 'n1', space: 'world', persist: true },
+        h,
+      ),
     )
     expect(res.ok).toBe(true)
     expect(h.measureSceneNodeBounds).toHaveBeenCalledWith('n1', 'world')
@@ -107,12 +114,14 @@ describe('dispatchEditorMcpCommand', () => {
     )
   })
 
-  it('measure_scene_node_bounds read-only skips updateNode', () => {
+  it('measure_scene_node_bounds read-only skips updateNode', async () => {
     const h = makeHandlers()
-    const res = dispatchEditorMcpCommand(
-      'measure_scene_node_bounds',
-      { nodeId: 'n1', persist: false },
-      h,
+    const res = await Promise.resolve(
+      dispatchEditorMcpCommand(
+        'measure_scene_node_bounds',
+        { nodeId: 'n1', persist: false },
+        h,
+      ),
     )
     expect(res.ok).toBe(true)
     expect(h.updateNode).not.toHaveBeenCalled()
@@ -125,5 +134,114 @@ describe('isSceneMutationCommand', () => {
     expect(isSceneMutationCommand('measure_scene_node_bounds', { persist: true })).toBe(true)
     expect(isSceneMutationCommand('measure_scene_node_bounds', { persist: false })).toBe(false)
     expect(isSceneMutationCommand('set_node_transform', {})).toBe(true)
+    expect(isSceneMutationCommand('set_script_inputs', {})).toBe(true)
+  })
+})
+
+const DOOR_OPENER_SOURCE = `
+export class DoorOpener {
+  /** @igltfInput { "kind": "node" } */
+  doorTarget = null
+
+  onLoaded() {}
+}
+`
+
+describe('set_script_inputs', () => {
+  const scriptAssets: ProjectAssetEntry[] = [
+    {
+      assetId: 'script-door',
+      relativePath: 'assets/DoorOpener.js',
+      assetKind: 'script',
+      scriptExports: ['DoorOpener'],
+    },
+  ]
+
+  it('validates and merges annotated fields', async () => {
+    const nodes: EditorNode[] = [
+      {
+        id: 'root',
+        name: 'Scene',
+        parentId: null,
+        position: [0, 0, 0],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1],
+      },
+      {
+        id: 'n-host',
+        name: 'Host',
+        parentId: 'root',
+        position: [0, 0, 0],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1],
+        interactionAttachments: [
+          { id: 'att-1', scriptAssetRef: 'script-door', serializedProps: {} },
+        ],
+      },
+      {
+        id: 'n-door',
+        name: 'Door',
+        parentId: 'root',
+        position: [0, 0, 0],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1],
+      },
+    ]
+    const h = makeHandlers({
+      getNodes: () => nodes,
+      getProjectAssets: () => scriptAssets,
+      fetchScriptSource: vi.fn(async () => DOOR_OPENER_SOURCE),
+    })
+    const res = await dispatchEditorMcpCommand(
+      'set_script_inputs',
+      {
+        nodeId: 'n-host',
+        attachmentId: 'att-1',
+        inputs: [{ field: 'doorTarget', value: { nodeId: 'n-door' } }],
+      },
+      h,
+    )
+    expect(res.ok).toBe(true)
+    expect(h.updateInteractionAttachment).toHaveBeenCalledWith('n-host', 'att-1', {
+      serializedProps: { doorTarget: { kind: 'node', id: 'n-door' } },
+    })
+  })
+
+  it('rejects unknown node ref', async () => {
+    const nodes: EditorNode[] = [
+      {
+        id: 'root',
+        name: 'Scene',
+        parentId: null,
+        position: [0, 0, 0],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1],
+      },
+      {
+        id: 'n-host',
+        name: 'Host',
+        parentId: 'root',
+        position: [0, 0, 0],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1],
+        interactionAttachments: [{ id: 'att-1', scriptAssetRef: 'script-door', serializedProps: {} }],
+      },
+    ]
+    const h = makeHandlers({
+      getNodes: () => nodes,
+      getProjectAssets: () => scriptAssets,
+      fetchScriptSource: vi.fn(async () => DOOR_OPENER_SOURCE),
+    })
+    const res = await dispatchEditorMcpCommand(
+      'set_script_inputs',
+      {
+        nodeId: 'n-host',
+        attachmentId: 'att-1',
+        inputs: [{ field: 'doorTarget', value: { nodeId: 'missing' } }],
+      },
+      h,
+    )
+    expect(res.ok).toBe(false)
+    if (!res.ok) expect(res.error.code).toBe('validation_failed')
   })
 })
