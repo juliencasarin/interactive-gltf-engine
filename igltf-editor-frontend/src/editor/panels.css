@@ -952,6 +952,75 @@
   min-height: 40px;
 }
 
+/* Script @igltfInput rows (Inspector) */
+.scriptInputRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.scriptInputLabel {
+  flex: 0 0 auto;
+  max-width: 38%;
+  font-size: 11px;
+  color: rgb(170, 170, 170);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.scriptInputValue {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.scriptInputValue .vecInput {
+  flex: 1;
+  min-width: 0;
+}
+
+.scriptInputRef[readonly] {
+  cursor: default;
+  color: rgb(200, 200, 200);
+}
+
+.scriptInputRef.scriptInputRef--dragOver {
+  outline: 1px solid rgba(255, 170, 42, 0.5);
+  border-color: rgba(255, 170, 42, 0.45);
+}
+
+.scriptInputClear {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  font-size: 11px;
+  line-height: 1.2;
+  border: 1px solid rgba(140, 140, 140, 0.45);
+  border-radius: 2px;
+  background: transparent;
+  color: rgb(160, 160, 160);
+  cursor: pointer;
+}
+
+.scriptInputClear:hover {
+  border-color: rgba(255, 140, 100, 0.45);
+  color: rgb(255, 170, 130);
+}
+
+.scriptInputObjectBlock {
+  margin-bottom: 4px;
+}
+
+.scriptInputObjectGroup {
+  margin-left: 8px;
+  padding-left: 8px;
+  border-left: 1px solid rgb(70, 70, 70);
+}
+
 .inspectorScriptDropHint {
   border-color: rgba(255, 170, 42, 0.28);
   background: rgba(35, 35, 35, 0.35);
