@@ -19,6 +19,9 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
+      "igltf-engine": fileURLToPath(
+        new URL("../igltf-engine/src/index.js", import.meta.url),
+      ),
     },
   },
   server: {

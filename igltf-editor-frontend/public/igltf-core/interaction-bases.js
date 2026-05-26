@@ -3,6 +3,7 @@
  * Served at /igltf-core/interaction-bases.js — extend in project scripts:
  *   import { EventInteraction } from '/igltf-core/interaction-bases.js'
  * Runtime injects global GLTF before your module loads.
+ * Canonical source: igltf-engine/js/interaction-bases.js
  */
 
 import { GlTFScript } from './gltf-script.js'
@@ -49,6 +50,13 @@ export class ManipulationInteraction extends Interaction {
   }
 }
 
+export class ParameterInteraction extends Interaction {
+  onParameter(_payload) {
+    return undefined
+  }
+}
+
+/** Reserved — not implemented in Play runtime at this stage. */
 export class DrawingInteraction extends Interaction {
   constructor() {
     super()
