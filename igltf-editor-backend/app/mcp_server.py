@@ -445,7 +445,11 @@ async def mcp_add_script_to_node(
     script_asset_id: str,
     serialized_props: dict[str, object] | None = None,
 ) -> dict[str, object]:
-    """Attach an interaction script asset to a scene node."""
+    """
+    Attach an interaction script asset to a scene node.
+    For event interactions, unannotated runtime options such as {"hold": true}
+    may be provided in serialized_props; use igltf_set_script_inputs for @igltfInput fields.
+    """
 
     return await igltf_add_script_to_node(
         project_id, node_id, script_asset_id, serialized_props=serialized_props
@@ -474,6 +478,7 @@ async def mcp_update_script_on_node(
     """
     Update serializedProps and/or script asset on an existing attachment.
     Deprecated for @igltfInput annotated fields — use igltf_set_script_inputs instead.
+    For unannotated event runtime options such as {"hold": true}, serializedProps is allowed.
     """
 
     return await igltf_update_script_on_node(

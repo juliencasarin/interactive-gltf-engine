@@ -112,6 +112,19 @@ The fallback is only for intentionally generic scripts. Do not rely on it to hid
 
 JSON object; inspect **`payload.umi3d`** for UMI3D-shaped DTO fields. Use **`GLTF`** only — not Three.js globals.
 
+### Event hold
+
+`EventInteraction` supports two event modes:
+
+- Default trigger events call `onEvent(payload)` once with `payload.eventType === "trigger"`.
+- Hold events call `onEvent(payload)` on press and release with:
+  - `payload.eventType === "holdStart"` and `payload.active === true`
+  - `payload.eventType === "holdEnd"` and `payload.active === false`
+
+There are no separate `onHoldStart` / `onHoldEnd` hooks; branch inside `onEvent(payload)`.
+
+Enable hold by setting `hold: true` on the script attachment `serializedProps` (Inspector/MCP). The Play export mirrors that value into the event DTO so the runtime can bind pointer down/up instead of a one-shot trigger.
+
 ## Portable runtime rules
 
 Interactive glTF scripts must be portable across browser Play, Unity-like runtimes, and other engines embedding a JavaScript VM. Use only standard ECMAScript, exported modules/classes, lifecycle callbacks, and the global `GLTF` host API documented here.
