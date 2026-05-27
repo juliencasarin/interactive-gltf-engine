@@ -33,7 +33,7 @@ export function buildRegistriesFromGltfNodes(nodes, extensionKey = 'EXT_IGLTF_UM
         ...(att.dto ?? {}),
         ...(att.serializedProps ?? {}),
         name: att.dto?.name ?? att.serializedProps?.name,
-        hold: att.dto?.hold ?? att.serializedProps?.hold,
+        hold: att.serializedProps?.hold ?? att.dto?.hold,
         url: att.dto?.url ?? att.serializedProps?.href ?? att.serializedProps?.url,
       }
 
