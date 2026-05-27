@@ -2,6 +2,8 @@
 setlocal
 pushd "%~dp0.." || exit /b 1
 
+call :ensure_nsis || goto :missing_nsis
+
 echo [build] Freeze FastAPI backend (PyInstaller one-folder)...
 pushd igltf-editor-backend || goto :fail
 call npm ci || goto :fail
@@ -9,7 +11,7 @@ call uv sync --extra packaging || goto :fail
 call uv run pyinstaller scripts\igltf-backend.spec --distpath ..\igltf-editor-frontend\resources --workpath pyinstaller-build\work --clean --noconfirm || goto :fail
 popd
 
-echo [build] npm ci + Tauri bundle ^(installer needs NSIS on PATH — see tauri-build\README.md^)
+echo [build] npm ci + Tauri bundle ^(installer needs NSIS on PATH - see tauri-build\README.md^)
 pushd igltf-editor-frontend || goto :fail
 call npm ci || goto :fail
 
@@ -23,9 +25,37 @@ popd
 echo Done.
 exit /b 0
 
+:ensure_nsis
+where makensis >nul 2>nul && exit /b 0
+
+if exist "%ProgramFiles%\NSIS\makensis.exe" (
+  set "PATH=%ProgramFiles%\NSIS;%PATH%"
+  exit /b 0
+)
+
+if exist "%ProgramFiles(x86)%\NSIS\makensis.exe" (
+  set "PATH=%ProgramFiles(x86)%\NSIS;%PATH%"
+  exit /b 0
+)
+
+if exist "%LocalAppData%\Programs\NSIS\makensis.exe" (
+  set "PATH=%LocalAppData%\Programs\NSIS;%PATH%"
+  exit /b 0
+)
+
+exit /b 1
+
+:missing_nsis
+echo.
+echo BUILD FAILED - NSIS was not found.
+echo Install NSIS in the default location or make sure makensis.exe is available on PATH, then retry.
+echo See tauri-build\README.md for prerequisites.
+popd
+exit /b 1
+
 :fail
 echo.
-echo BUILD FAILED — see messages above.
+echo BUILD FAILED - see messages above.
 popd
 popd 2>nul
 exit /b 1

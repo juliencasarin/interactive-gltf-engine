@@ -15,6 +15,17 @@
 
 **Do not** hand-patch `@igltfInput` fields via `igltf_update_script_on_node` / raw `serializedProps`.
 
+## Runtime event options
+
+`hold` is an event interaction option, not an `@igltfInput` field. It controls how Play routes input to `EventInteraction.onEvent(payload)`:
+
+| `serializedProps.hold` | Runtime payloads |
+|------------------------|------------------|
+| absent / `false` | one call with `eventType: "trigger"` |
+| `true` | press: `eventType: "holdStart", active: true`; release: `eventType: "holdEnd", active: false` |
+
+Agents may set this unannotated runtime option with `serialized_props` when calling `igltf_add_script_to_node`, or with `igltf_update_script_on_node` for an existing attachment. Do not use this raw path for keys declared with `@igltfInput`; use `igltf_set_script_inputs` for those.
+
 ## Semantic values
 
 | Kind | `value` |

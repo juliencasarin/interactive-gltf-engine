@@ -28,6 +28,7 @@ _UUID_HEX_STEM = re.compile(
 
 _TRACKED_SUFFIXES = frozenset({".glb", ".gltf", ".js", ".mjs", ".cjs"})
 _SCRIPT_SUFFIXES = frozenset({".js", ".mjs", ".cjs"})
+_GLTF_SUFFIXES = frozenset({".glb", ".gltf"})
 
 
 def _norm_rel(rel: str) -> str:
@@ -138,6 +139,167 @@ def sync_assets_from_disk_locked(project_id: str) -> list[dict[str, Any]]:
     """
     with project_fs_lock(project_id):
         return _sync_assets_from_disk_inner(project_id)
+
+
+def load_asset_catalog_snapshot(project_id: str) -> dict[str, Any]:
+    """Return the asset catalog only, without scene nodes or editor settings."""
+
+    pj = project_json_path(project_id)
+    if not pj.is_file():
+        return {"assets": [], "assetFolders": []}
+    doc = ProjectDocumentV2.model_validate_json(pj.read_text(encoding="utf-8"))
+    return {
+        "assets": [json.loads(a.model_dump_json()) for a in doc.assets],
+        "assetFolders": list(doc.assetFolders or []),
+    }
+
+
+def _unique_drop_name(adir: Path, preferred_name: str) -> str:
+    """Return a filename free under assets/ while preserving the user's original stem."""
+    src_name = Path(preferred_name).name
+    stem = Path(src_name).stem.strip() or "asset"
+    suffix = Path(src_name).suffix
+    candidate = f"{stem}{suffix}"
+    if not (adir / candidate).exists():
+        return candidate
+
+    for i in range(2, 1000):
+        candidate = f"{stem} ({i}){suffix}"
+        if not (adir / candidate).exists():
+            return candidate
+    return f"{stem}-{uuid.uuid4().hex[:8]}{suffix}"
+
+
+def _stable_catalog_name(logical_name: str | None, display_name: str | None) -> str | None:
+    raw = (logical_name or display_name or "").strip()
+    if not raw:
+        return None
+    return sanitize_stem(raw) or raw
+
+
+def _patch_imported_asset_catalog_name(
+    project_id: str,
+    asset_id: str,
+    logical_name: str | None,
+    display_name: str | None,
+) -> str | None:
+    catalog_name = _stable_catalog_name(logical_name, display_name)
+    if not catalog_name:
+        return None
+    pj = project_json_path(project_id)
+    doc = ProjectDocumentV2.model_validate_json(pj.read_text(encoding="utf-8"))
+    updated = False
+    for i, asset in enumerate(doc.assets):
+        if asset.assetId != asset_id:
+            continue
+        doc.assets[i] = asset.model_copy(update={"name": catalog_name})
+        updated = True
+        break
+    if updated:
+        pj.write_text(doc.model_dump_json(indent=2), encoding="utf-8")
+        touch_saved_metadata(project_id)
+    return catalog_name
+
+
+def import_gltf_asset_from_absolute_path(
+    project_id: str,
+    source_path: str,
+    logical_name: str | None = None,
+    display_name: str | None = None,
+) -> dict[str, Any]:
+    """
+    Copy an external .glb/.gltf file into workspace assets/ and run catalogue disk sync.
+
+    The original file is preserved. Disk sync renames the copied file to the canonical
+    asset id filename and updates project.json using the normal catalog merge path.
+
+    Optional logical_name/display_name set ProjectAsset.name for stable lookup by name.
+    """
+    try:
+        src = Path(source_path).expanduser()
+    except (OSError, ValueError):
+        return {"error": {"code": "invalid_argument", "message": f"Invalid source_path: {source_path!r}"}}
+
+    if not src.is_absolute():
+        return {"error": {"code": "invalid_argument", "message": "source_path must be an absolute path"}}
+
+    try:
+        src = src.resolve(strict=True)
+    except (OSError, ValueError) as e:
+        return {"error": {"code": "not_found", "message": f"Source file not found: {source_path!r}", "detail": str(e)}}
+
+    if not src.is_file():
+        return {"error": {"code": "not_file", "message": f"Source path is not a file: {src}"}}
+
+    suffix = src.suffix.lower()
+    if suffix not in _GLTF_SUFFIXES:
+        return {"error": {"code": "unsupported_file_type", "message": "Only .glb and .gltf files can be imported"}}
+
+    try:
+        project_dir(project_id).resolve()
+    except ValueError as e:
+        return {"error": {"code": "project_not_found", "message": str(e)}}
+
+    with project_fs_lock(project_id):
+        adir = assets_dir(project_id)
+        adir.mkdir(parents=True, exist_ok=True)
+        try:
+            src.relative_to(adir.resolve())
+            return {
+                "error": {
+                    "code": "invalid_argument",
+                    "message": (
+                        "source_path already points inside the project assets/ folder; "
+                        "use disk sync for files already under assets/"
+                    ),
+                }
+            }
+        except ValueError:
+            pass
+
+        preferred = src.name
+        stable = _stable_catalog_name(logical_name, display_name)
+        if stable:
+            preferred = f"{stable}{suffix}"
+        drop_name = _unique_drop_name(adir, preferred)
+        drop_path = adir / drop_name
+        try:
+            shutil.copy2(src, drop_path)
+        except OSError as e:
+            return {
+                "error": {
+                    "code": "copy_failed",
+                    "message": f"Could not copy source file into assets/: {e}",
+                }
+            }
+
+        events = _sync_assets_from_disk_inner(project_id)
+
+    added = [e for e in events if e.get("type") == "asset_added"]
+    imported_row = added[0] if added else None
+    catalog_name: str | None = None
+    if imported_row and isinstance(imported_row.get("assetId"), str):
+        catalog_name = _patch_imported_asset_catalog_name(
+            project_id,
+            imported_row["assetId"],
+            logical_name,
+            display_name,
+        )
+    payload: dict[str, Any] = {
+        "projectId": project_id,
+        "sourcePath": str(src),
+        "events": events,
+        "imported": imported_row,
+        "logicalName": logical_name,
+        "displayName": display_name,
+        "catalogName": catalog_name,
+    }
+    if suffix == ".gltf":
+        payload["warning"] = (
+            "Imported the .gltf JSON file only. External buffers/images referenced beside it must also be available "
+            "under assets/ or packed into a .glb."
+        )
+    return payload
 
 
 def _sync_assets_from_disk_inner(project_id: str) -> list[dict[str, Any]]:

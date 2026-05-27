@@ -20,6 +20,7 @@ from starlette.responses import FileResponse
 from unicodedata import normalize
 
 from app.apply_document import apply_and_persist_project
+from app.assets_disk_sync import load_asset_catalog_snapshot
 from app.assets_watch import handle_assets_watch_websocket
 from app.editor_session import handle_editor_session_websocket
 from app.build_play_glb import build_scene_to_play_glb
@@ -252,6 +253,19 @@ def get_document(project_id: str) -> JSONResponse:
     except (OSError, json.JSONDecodeError) as e:
         raise HTTPException(status_code=500, detail=f"invalid project.json: {e}") from e
     return JSONResponse(content=data)
+
+
+@app.get("/projects/{project_id}/assets/catalog")
+def get_asset_catalog(project_id: str) -> dict:
+    """Asset catalog endpoint separated from the full scene document."""
+
+    try:
+        ensure_project_layout(project_id)
+        return load_asset_catalog_snapshot(project_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except (OSError, json.JSONDecodeError) as e:
+        raise HTTPException(status_code=500, detail=f"invalid asset catalog: {e}") from e
 
 
 @app.put("/projects/{project_id}/document")

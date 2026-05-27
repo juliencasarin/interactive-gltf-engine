@@ -15,6 +15,7 @@ from app.interactive_gltf_ext import EXT_INTERACTIVE_GLTF, interactive_gltf_root
 from app.script_input_schema import remap_node_refs_in_serialized_props
 from app.igltf_umi3d_proto import (
     EXT_IGLTF_UMI3D_PROTO,
+    event_hold_from_serialized_props,
     interaction_kind_str,
     script_handler_id,
     umi3d_proto_attachment_entry,
@@ -736,6 +737,12 @@ def build_scene_to_play_glb(project_id: str) -> Path:
                 _authoring_node_to_gltf_index,
             ) or {}
             merged_props.setdefault("targetId", str(gltf_idx))
+            event_hold = (
+                event_hold_from_serialized_props(merged_props)
+                if interaction_kind_str(pa) == "event"
+                else False
+            )
+
             entries.append(
                 umi3d_proto_attachment_entry(
                     attachment_id=att.id,
@@ -744,6 +751,7 @@ def build_scene_to_play_glb(project_id: str) -> Path:
                     script_handler_id=script_handler_id(pa),
                     interaction_kind=interaction_kind_str(pa),
                     serialized_props=merged_props,
+                    event_hold=event_hold,
                 )
             )
         node = out.nodes[gltf_idx]

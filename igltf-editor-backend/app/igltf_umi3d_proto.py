@@ -33,6 +33,11 @@ def interaction_kind_str(asset: ProjectAsset | None) -> str:
     return (asset.interactionKind or "event").lower() if asset else "event"
 
 
+def event_hold_from_serialized_props(serialized_props: dict[str, Any] | None) -> bool:
+    """True when an event attachment requests press/release (hold) interaction payloads."""
+    return (serialized_props or {}).get("hold") is True
+
+
 def umi3d_proto_attachment_entry(
     *,
     attachment_id: str,

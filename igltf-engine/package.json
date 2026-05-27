@@ -1,0 +1,19 @@
+{
+  "name": "igltf-engine",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "JavaScript/Three.js runtime for interactive-gltf (interactions, host API).",
+  "types": "./src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "import": "./src/index.js"
+    },
+    "./interaction-bases": "./js/interaction-bases.js",
+    "./gltf-script": "./js/gltf-script.js"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  }
+}

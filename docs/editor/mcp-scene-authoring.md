@@ -1,116 +1,60 @@
-# MCP live scene authoring
+# MCP scene authoring (migration / agents)
 
-**Status:** Implemented (`igltf-editor-backend` MCP + editor WebSocket session).
+Operational reference for **igltf-editor-backend** MCP tools that read or mutate the **live editor session**. See [editor-session-protocol.md](editor-session-protocol.md) for WebSocket message shapes.
 
-## Purpose
+## Prerequisites
 
-Coding agents (Cursor MCP, etc.) read and mutate the **live** editor scene without relying on unsaved `project.json` on disk. The editor pushes snapshots over **`WS /projects/{project_id}/editor/session`**; MCP tools read that session and forward mutations to the connected frontend.
+1. Resolve **`project_id`** (hub UUID): `igltf_list_registered_projects` or `igltf_resolve_project_id` (read `.igltf/project-id` in the workspace).
+2. Open the project in **igltf-editor** (not Cursor alone).
+3. Call **`igltf_get_editor_session_status`** before mutations. If `canMutateScene` is false, do **not** edit `project.json` on disk.
 
-## Preconditions
-
-| Requirement | Detail |
-|-------------|--------|
-| Editor open | igltf-editor focused on the project workspace |
-| Live session | WebSocket connected; backend holds latest snapshot |
-| Mutations enabled | `editorSettings.mcpAllowSceneEdition === true` (Settings → Allow scene edition) |
-
-Effective default for `mcpAllowSceneEdition` is **`false`**.
-
-## Session capabilities
-
-Read tools and mutation responses include **`sessionCapabilities`**:
-
-| Field | Meaning |
-|-------|---------|
-| `canReadLiveSession` | Snapshot available from connected editor |
-| `canMutateScene` | Mutations allowed (session + flag + connected editor) |
-| `userMessage` | Human-readable block reason when false |
-| `userAction` | Suggested fix (e.g. enable Settings) |
-
-**Always call `igltf_get_editor_session_status` before write tools.**
-
-## MCP tools
-
-### Project identity
+## Transform audit (read-only)
 
 | Tool | Purpose |
 |------|---------|
-| `igltf_list_registered_projects` | Hub UUID, diskPath, session state |
-| `igltf_resolve_project_id` | UUID from `.igltf/project-id` or folder path |
+| `igltf_get_transform_conventions` | RH Y-up, meters, Euler **XYZ radians**, local storage |
+| `igltf_get_node_transform` | Local + world TRS (+ optional 16-element column-major `worldMatrix`) for one node |
+| `igltf_get_nodes_details` | Batch node details; optional transforms per node |
+| `igltf_list_scene_hierarchy` | Pass `include_transforms=true`, `transform_space=local\|world\|both` |
+| `igltf_convert_transform_convention` | Pure conversion (e.g. `unity_lh_y_up` → `gltf_rh_y_up`) |
 
-Never use folder display name as `project_id` unless `igltf_resolve_project_id` confirms it.
+World transforms in audit tools are composed from the parent chain of **local** TRS on the live snapshot (same rules as `transformMath.ts`).
 
-### Read (live session)
+**`set_node_transform` / `igltf_apply_transform_batch` with `space: "world"`:** accepts world Euler XYZ radians; the editor converts to local under the parent before save.
 
-| Tool | Notes |
-|------|-------|
-| `igltf_list_scene_hierarchy` | Compact tree; `includeDescriptions` optional |
+## Safe batch mutations
+
+| Tool | Purpose |
+|------|---------|
+| `igltf_apply_transform_batch` | `updates[]`, `space`, `dry_run`, optional `transaction_label` — single undo step when applied |
+| `igltf_undo_last_editor_change` | One step on the editor undo stack |
+
+Use **`dry_run: true`** to get `wouldAffect`, `resolvedTransforms`, and `errors` without mutating.
+
+## Bounds and viewport
+
+| Tool | Purpose |
+|------|---------|
+| `igltf_measure_scene_node_bounds` | Per-node viewport AABB + sphere |
+| `igltf_measure_scene_subtree_bounds` | Union bounds over a node and descendants |
+| `igltf_compare_bounds` | Compare two nodes, subtrees, or catalog assets (`target`: `node` \| `subtree` \| `asset`) |
+| `igltf_get_viewport_camera_summary` | Camera pose, clip planes, orbit target, visible roots |
+| `igltf_get_bounds_metadata` | Stored `authoringBounds` from snapshot (no viewport) |
+
+See [authoring-bounds.md](authoring-bounds.md). Viewport measure requires meshes loaded in the editor preview.
+
+## Assets
+
+| Tool | Purpose |
+|------|---------|
+| `igltf_import_gltf_asset` | Copy absolute `.glb`/`.gltf` into `assets/`; optional `logical_name` / `display_name` for stable `ProjectAsset.name` |
 | `igltf_list_assets` | Catalog from live session |
-| `igltf_get_descriptions` | Node/asset author descriptions |
-| `igltf_get_node_details` | Full row + script attachments |
-| `igltf_introspect_script_inputs` | `@igltfInput` schema for a script catalog asset |
-| `igltf_get_script_attachment_inputs` | Attachment schema + current `serializedProps` + labels |
-| `igltf_get_bounds_metadata` | Stored `authoringBounds`; `target`: `node` \| `asset` |
+| `igltf_instantiate_asset` | Place catalog glTF in the scene |
 
-### Measure (viewport; `persist` requires mutation permission)
-
-| Tool | Parameters |
-|------|------------|
-| `igltf_measure_scene_node_bounds` | `node_id`, `space`: `local` \| `world`, `persist?` |
-| `igltf_measure_asset_bounds` | `asset_id`, `persist?` |
-
-Persisted bounds are **editor-only** — see [igltf-editor-project.md](igltf-editor-project.md).
-
-### Write (live session + `mcpAllowSceneEdition`)
-
-| Category | Tools |
-|----------|-------|
-| Scene graph | `igltf_set_node_transform`, `igltf_reparent_node`, `igltf_rename_node`, `igltf_set_node_visibility`, `igltf_instantiate_asset`, `igltf_delete_nodes`, `igltf_set_description` |
-| Scripts on nodes | `igltf_add_script_to_node`, `igltf_remove_script_from_node`, `igltf_update_script_on_node`, **`igltf_set_script_inputs`** |
-
-For `@igltfInput` annotated fields, prefer **`igltf_set_script_inputs`** — see [script-inputs-mcp.md](script-inputs-mcp.md). `igltf_update_script_on_node` is deprecated for annotated keys (may return a `warning`).
-
-Responses include **`mutationNotice`** when blocked.
-
-### Framework kit (scripts)
+## Scene structure
 
 | Tool | Purpose |
 |------|---------|
-| `igltf_list_framework_files` | Paths under bundled `authoring_kit/` |
-| `igltf_read_framework_file` | Read one kit file (see [script-authoring.md](script-authoring.md)) |
-
-## Agent policy (strict)
-
-Agents **must not** edit `project.json` on disk — **including as fallback** when the live session is missing or `canMutateScene` is false.
-
-Each workspace ships **`.cursor/rules/igltf-no-hand-edit-project-json.mdc`** (generated by `ensure_project_layout` when absent). If scene tools cannot run, inform the user and wait for igltf-editor + live session.
-
-Catalog **files** under `assets/` may be added/changed on disk; backend disk sync updates the catalog — but **scene graph** changes require MCP or the editor UI + Save.
-
-## Workspace bootstrap
-
-On `POST /studio/projects/create` or first `ensure_project_layout`:
-
-- **`mcp.json`** — MCP server URL (`PUBLIC_BASE_URL/mcp`)
-- **`.cursor/rules/igltf-no-hand-edit-project-json.mdc`**
-
-Existing files are never overwritten.
-
-## Live session protocol
-
-WebSocket message types and command ops: **[editor-session-protocol.md](editor-session-protocol.md)**.
-
-## Out of scope (v1)
-
-- Creating script source files or editing `.js` bodies via MCP scene tools
-- `expandGltfInterior` / `collapseGltfInterior` via MCP
-- Headless mutation without an open editor
-
-## Planned
-
-- Optimistic concurrency / stale revision rejection (human + agent concurrent edits)
-- Optional global machine-level kill switch beyond per-project `mcpAllowSceneEdition`
-
-## Portable standard
-
-MCP tools and `editorSettings` are **product API** — not part of **`interactive-gltf-specs`**. Exported script and interaction shapes are covered by [play-export.md](play-export.md) and specs proposals.
+| `igltf_create_empty_node` | Empty node under a parent |
+| `igltf_get_node_details` | Single-node details (local TRS, scripts, bounds metadata) |
+| `igltf_reparent_node` | Reparent with optional `keep_world_position` |

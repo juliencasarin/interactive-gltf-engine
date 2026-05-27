@@ -1,17 +1,37 @@
 # igltf-engine
 
-**JavaScript/TypeScript** runtime for **interactive-gltf**: loads glTF 2.0 assets that declare interactive-gltf extensions, provides a **host API** for scripts, and runs authored behaviors in the browser.
+JavaScript/Three.js **interaction runtime** for interactive-gltf Play and future viewers.
 
-## Iteration 1 — not in scope
+## Package layout
 
-This package is **not implemented in the first iteration**. The editor **Play** view will integrate **`igltf-engine`** once the backend + frontend POC is in place.
+| Path | Role |
+|------|------|
+| `src/` | Runtime: tool/selector/projection, PC + WebXR input layers, Play orchestration |
+| `js/interaction-bases.js` | Author-facing interaction script base classes |
+| `js/gltf-script.js` | `GlTFScript` base class |
 
-**Open design points** (to resolve when work starts) are listed under **Runtime (`igltf-engine`)** in [`../ROADMAP.md`](../ROADMAP.md): language, bundler, Three.js version, script loading model, host API naming, sandboxing, offline/static hosting.
+## Public API
 
-## Spec impact (when implemented)
+```js
+import { createPlayInteractionRuntime } from 'igltf-engine'
+```
 
-Any change to **extension JSON expectations**, **script entrypoint**, or **host API surface** must be mirrored in the **`interactive-gltf-specs`** repository (`proposals/` / `specifications/`) using the **`sync-interactive-gltf-format-from-engine`** skill in that repo.
+- **Contract:** `interaction-runtime-contract.js` — portable payloads (`eventTriggered`, `formAnswer`, `manipulationRequest`, …).
+- **Play:** `PlayInteractionRuntime` wires registries, PC selector, DOM UIs (interactable list, forms, contextual parameters), optional WebXR layer.
+- **Drawing:** explicitly unsupported at this stage (`normalizeInteractionKind('drawing')` → `unsupported`).
 
-## Package layout (future)
+## Play integration
 
-This directory will gain `package.json`, sources, and build output when implementation proceeds.
+The editor frontend imports this package via Vite alias (`igltf-engine` → `../igltf-engine/src/index.js`). See `igltf-editor-frontend/src/play/playInteractionRuntimeBridge.ts` and `PlayInteractiveGltf.tsx`.
+
+Camera/navigation remain in the Play React layer; this package only handles interaction selection, projection, and script invocation.
+
+## Tests
+
+```bash
+cd igltf-engine && npm test
+```
+
+## Spec sync
+
+When exported payloads or host callbacks stabilize, update **interactive-gltf-specs** (`proposals/` / `specifications/`) using the `sync-interactive-gltf-format-from-engine` skill. See `docs/interaction-runtime.md`.

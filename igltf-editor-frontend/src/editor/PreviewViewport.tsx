@@ -1,4 +1,4 @@
-import { Canvas, events as r3fEvents, useThree, type RootStore, type ThreeEvent } from '@react-three/fiber'
+import { Canvas, events as r3fEvents, useFrame, useThree, type RootStore, type ThreeEvent } from '@react-three/fiber'
 import { Grid, OrbitControls, TransformControls, useGLTF } from '@react-three/drei'
 import {
   Suspense,
@@ -39,6 +39,7 @@ import {
   unregisterAssetGltfRoot,
   unregisterSceneNodeObject,
 } from './editorViewportBounds'
+import { registerViewportCamera, unregisterViewportCamera } from './editorViewportState'
 import { localTRSFromObjectMatrices, mirrorDeltaFromObject, type TransformSpace } from './transformMath'
 import type { EditorNode, ProjectAssetEntry } from './types'
 
@@ -831,6 +832,19 @@ function ViewportGrid() {
   )
 }
 
+function ViewportCameraReporter({ orbitRef }: { orbitRef: React.RefObject<unknown> }) {
+  const { camera } = useThree()
+  useFrame(() => {
+    if (!(camera instanceof THREE.PerspectiveCamera)) return
+    const controls = orbitRef.current as { target?: THREE.Vector3 } | null
+    registerViewportCamera(camera, controls?.target ?? null)
+  })
+  useEffect(() => {
+    return () => unregisterViewportCamera(camera instanceof THREE.PerspectiveCamera ? camera : undefined)
+  }, [camera])
+  return null
+}
+
 function ViewportScene() {
   const { nodes, isolateSubtreeId, setSelectionId, setPanelFocus } = useEditor()
   const orbitRef = useRef<unknown>(null)
@@ -863,6 +877,7 @@ function ViewportScene() {
       </group>
       {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
       <OrbitControls ref={orbitRef as any} makeDefault enableDamping dampingFactor={0.08} />
+      <ViewportCameraReporter orbitRef={orbitRef} />
     </>
   )
 }

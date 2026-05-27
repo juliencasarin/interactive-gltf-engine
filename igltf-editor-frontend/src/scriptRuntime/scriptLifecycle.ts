@@ -206,7 +206,11 @@ export class ScriptInstanceManager {
     return this.instances.get(attachmentId)
   }
 
-  invokeOnAttachment(attachmentId: string, payload: Record<string, unknown>): unknown {
+  invokeOnAttachment(
+    attachmentId: string,
+    payload: Record<string, unknown>,
+    methodOverride?: string,
+  ): unknown {
     const inst = this.instances.get(attachmentId)
     if (!inst) {
       console.warn('[igltf play] no script instance for attachment', attachmentId)
@@ -214,7 +218,8 @@ export class ScriptInstanceManager {
     }
     const meta = this.attachmentMeta.get(attachmentId)
     const kind = meta?.interactionKind
-    const methodName = kind ? interactionMainMethodForKind(kind) : 'onEvent'
+    const methodName =
+      methodOverride ?? (kind ? interactionMainMethodForKind(kind) : 'onEvent')
     const result = invokeMethodOnInstance(inst, methodName, payload)
     this.emitHookResult(result)
     return result

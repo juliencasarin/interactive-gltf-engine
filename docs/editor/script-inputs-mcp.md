@@ -26,6 +26,31 @@ This document is the **operational workflow for LLM agents** using MCP scene too
 
 Script **source** edits remain disk / REST (`PUT …/assets/{id}/source`) — not MCP scene tools.
 
+## Runtime event options
+
+`hold` is an event interaction option, not an `@igltfInput` field. It controls how Play routes input to `EventInteraction.onEvent(payload)`:
+
+| `serializedProps.hold` | Runtime payloads |
+|------------------------|------------------|
+| absent / `false` | one call with `eventType: "trigger"` |
+| `true` | press: `eventType: "holdStart", active: true`; release: `eventType: "holdEnd", active: false` |
+
+Agents may set this unannotated runtime option with `serialized_props` when calling `igltf_add_script_to_node`, or with `igltf_update_script_on_node` for an existing attachment:
+
+```json
+{
+  "project_id": "…",
+  "node_id": "n-button",
+  "attachment_id": "att-push",
+  "serialized_props": {
+    "hold": true,
+    "targetLocalPosition": { "x": 0, "y": -0.2, "z": 0 }
+  }
+}
+```
+
+Do not use this raw path for keys declared with `@igltfInput`; use `igltf_set_script_inputs` for those.
+
 ## Semantic `value` by kind
 
 | `inputKind` | Semantic `value` (in `inputs[]`) | Stored JSON |

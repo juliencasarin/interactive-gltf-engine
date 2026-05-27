@@ -30,7 +30,7 @@ See also **[../README.md](../README.md)** (engine-wide index) and **[../mileston
 | [interior-scene-nodes.md](interior-scene-nodes.md) | Catalogue mirrors, expand/collapse, export |
 | [play-export.md](play-export.md) | `build/scene.glb`, extensions, proto alignment |
 | [play-viewer.md](play-viewer.md) | Play runtime behaviour |
-| [script-authoring.md](script-authoring.md) | JS modules, lifecycle, transactions |
+| [script-authoring.md](script-authoring.md) | Class selection, `interactionKind` routing, lifecycle, portability rules, transactions |
 | [host-api.md](host-api.md) | Global `GLTF` API |
 | [transform-authoring.md](transform-authoring.md) | Inspector + gizmo |
 | [authoring-bounds.md](authoring-bounds.md) | Measured bounds (MCP-only persist) |

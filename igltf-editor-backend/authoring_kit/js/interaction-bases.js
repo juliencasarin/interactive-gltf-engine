@@ -49,6 +49,12 @@ export class ManipulationInteraction extends Interaction {
   }
 }
 
+export class ParameterInteraction extends Interaction {
+  onParameter(_payload) {
+    return undefined
+  }
+}
+
 export class DrawingInteraction extends Interaction {
   constructor() {
     super()

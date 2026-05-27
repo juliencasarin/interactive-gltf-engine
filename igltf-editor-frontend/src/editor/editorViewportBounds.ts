@@ -1,6 +1,9 @@
-import type * as THREE from 'three'
-import { measureObjectBounds } from './authoringBounds'
+import * as THREE from 'three'
+import { measureObjectBounds, sphereFromBox3 } from './authoringBounds'
+import { unionAuthoringBoundsAabb } from './boundsCompare'
 import type { AuthoringBoundsMetadata } from './types'
+
+const _unionBox = new THREE.Box3()
 
 const sceneNodeObjects = new Map<string, THREE.Object3D>()
 /** Per placement clone roots (`assetId::placementId`) plus latest fallback per asset id. */
@@ -48,6 +51,30 @@ export function measureSceneNodeBoundsFromViewport(
   const obj = sceneNodeObjects.get(nodeId)
   if (!obj) return null
   return measureObjectBounds(obj, space)
+}
+
+/** Union viewport mesh bounds for all descendant node ids that have registered objects. */
+export function measureSceneSubtreeBoundsFromViewport(
+  descendantNodeIds: string[],
+  space: 'local' | 'world',
+): AuthoringBoundsMetadata | null {
+  const aabbs = []
+  for (const nid of descendantNodeIds) {
+    const obj = sceneNodeObjects.get(nid)
+    if (!obj) continue
+    const b = measureObjectBounds(obj, space)
+    if (b) aabbs.push(b.aabb)
+  }
+  const merged = unionAuthoringBoundsAabb(aabbs)
+  if (!merged) return null
+  _unionBox.min.set(merged.min[0], merged.min[1], merged.min[2])
+  _unionBox.max.set(merged.max[0], merged.max[1], merged.max[2])
+  return {
+    space,
+    aabb: merged,
+    sphere: sphereFromBox3(_unionBox),
+    measuredAt: new Date().toISOString(),
+  }
 }
 
 /** Catalog glTF bounds in model-local space (clone root, ignoring placement transform). */

@@ -51,18 +51,54 @@ function makeHandlers(overrides: Partial<EditorMcpCommandHandlers> = {}): Editor
     reparentSceneNode: vi.fn(),
     placeSceneNodeInHierarchy: vi.fn(),
     addSceneNodeFromAsset: vi.fn(() => 'new-node'),
+    addEmptySceneNode: vi.fn(() => 'empty-node'),
     deleteSceneSubtrees: vi.fn(),
     addInteractionAttachment: vi.fn(() => 'att-1'),
     removeInteractionAttachment: vi.fn(),
     updateInteractionAttachment: vi.fn(),
     measureSceneNodeBounds: vi.fn(() => sampleBounds),
+    measureSceneSubtreeBounds: vi.fn(() => sampleBounds),
     measureAssetBounds: vi.fn(() => null),
+    applyTransformBatch: vi.fn(() => ({
+      wouldAffect: 1,
+      resolvedTransforms: [
+        {
+          nodeId: 'n1',
+          local: { position: [0, 0, 0] as [number, number, number], rotation: [0, 0, 0] as [number, number, number], scale: [1, 1, 1] as [number, number, number] },
+        },
+      ],
+      errors: [],
+    })),
+    undoLastChange: vi.fn(() => true),
     fetchScriptSource: vi.fn(async () => ''),
     ...overrides,
   }
 }
 
 describe('dispatchEditorMcpCommand', () => {
+  it('create_empty_node creates an empty child under root by default', async () => {
+    const h = makeHandlers()
+    const res = await Promise.resolve(
+      dispatchEditorMcpCommand('create_empty_node', { name: 'Anchor', position: [1, 2, 3] }, h),
+    )
+    expect(res.ok).toBe(true)
+    if (res.ok) expect(res.result).toEqual({ nodeId: 'empty-node' })
+    expect(h.addEmptySceneNode).toHaveBeenCalledWith({
+      parentId: 'root',
+      name: 'Anchor',
+      position: [1, 2, 3],
+    })
+  })
+
+  it('create_empty_node rejects missing parent', async () => {
+    const h = makeHandlers()
+    const res = await Promise.resolve(
+      dispatchEditorMcpCommand('create_empty_node', { parentId: 'missing' }, h),
+    )
+    expect(res.ok).toBe(false)
+    if (!res.ok) expect(res.error.code).toBe('node_not_found')
+  })
+
   it('rename_node calls updateNode', async () => {
     const h = makeHandlers()
     const res = await Promise.resolve(dispatchEditorMcpCommand('rename_node', { nodeId: 'n1', name: 'Renamed' }, h))
@@ -133,6 +169,7 @@ describe('isSceneMutationCommand', () => {
     const { isSceneMutationCommand } = await import('./editorMcpCommands')
     expect(isSceneMutationCommand('measure_scene_node_bounds', { persist: true })).toBe(true)
     expect(isSceneMutationCommand('measure_scene_node_bounds', { persist: false })).toBe(false)
+    expect(isSceneMutationCommand('create_empty_node', {})).toBe(true)
     expect(isSceneMutationCommand('set_node_transform', {})).toBe(true)
     expect(isSceneMutationCommand('set_script_inputs', {})).toBe(true)
   })
@@ -205,6 +242,49 @@ describe('set_script_inputs', () => {
     expect(h.updateInteractionAttachment).toHaveBeenCalledWith('n-host', 'att-1', {
       serializedProps: { doorTarget: { kind: 'node', id: 'n-door' } },
     })
+  })
+
+  it('apply_transform_batch dry_run does not require mutation handlers beyond preview', async () => {
+    const h = makeHandlers({
+      applyTransformBatch: vi.fn(() => ({
+        wouldAffect: 1,
+        resolvedTransforms: [
+          {
+            nodeId: 'n1',
+            local: { position: [2, 0, 0] as [number, number, number], rotation: [0, 0, 0] as [number, number, number], scale: [1, 1, 1] as [number, number, number] },
+          },
+        ],
+        errors: [],
+      })),
+    })
+    const res = await Promise.resolve(
+      dispatchEditorMcpCommand(
+        'apply_transform_batch',
+        {
+          dry_run: true,
+          space: 'local',
+          updates: [{ nodeId: 'n1', position: [2, 0, 0] }],
+        },
+        h,
+      ),
+    )
+    expect(res.ok).toBe(true)
+    if (res.ok) {
+      expect((res.result as { dryRun: boolean }).dryRun).toBe(true)
+      expect((res.result as { wouldAffect: number }).wouldAffect).toBe(1)
+    }
+    expect(h.applyTransformBatch).toHaveBeenCalledWith(
+      [{ nodeId: 'n1', position: [2, 0, 0] }],
+      'local',
+      { dryRun: true, transactionLabel: undefined },
+    )
+  })
+
+  it('undo_last_change reports failure when stack empty', async () => {
+    const h = makeHandlers({ undoLastChange: vi.fn(() => false) })
+    const res = await Promise.resolve(dispatchEditorMcpCommand('undo_last_change', {}, h))
+    expect(res.ok).toBe(false)
+    if (!res.ok) expect(res.error.code).toBe('nothing_to_undo')
   })
 
   it('rejects unknown node ref', async () => {

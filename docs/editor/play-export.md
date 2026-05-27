@@ -41,6 +41,9 @@ Placement: **`nodes[i].extensions.EXT_IGLTF_UMI3D_PROTO.umi3d`**
 
 **`targetId` semantics:** refers to a **glTF `nodes[]` index in the emitted `scene.glb`**, not the catalogue file. If absent in `serializedProps`, exporter sets it to the **merged glTF node index** (string digits) for the authoring row — including interior mirror rows.
 
+For event interactions, attachment `serializedProps.hold === true` is exported as `attachments[].dto.hold === true`.
+Play then emits `payload.eventType: "holdStart"` on pointer/key down and `"holdEnd"` on pointer/key up. Without hold, Play emits a one-shot `"trigger"` event.
+
 ## Divergences vs target specs (track in specs repo)
 
 | Area | Prototype (this editor) | Target (`interactive-gltf-specs`) |

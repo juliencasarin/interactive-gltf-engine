@@ -4,7 +4,7 @@
 
 | Path | Canonical | Role |
 |------|-----------|------|
-| `md/script-authoring.md` | `docs/editor/script-authoring.md` | Module patterns, lifecycle, transactions |
+| `md/script-authoring.md` | `docs/editor/script-authoring.md` | Class selection, `interactionKind` routing, lifecycle, portability rules, transactions |
 | `md/script-inputs-mcp.md` | `docs/editor/script-inputs-mcp.md` | MCP agent workflow for `@igltfInput` |
 | `md/host-api.md` | `docs/editor/host-api.md` | Global `GLTF` host surface |
 | `md/transform-authoring.md` | `docs/editor/transform-authoring.md` | Inspector / gizmo UX |
