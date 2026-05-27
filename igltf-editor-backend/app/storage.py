@@ -103,6 +103,14 @@ def ensure_project_cursor_rules(project_id: str) -> None:
     write_project_cursor_rule_if_absent(project_dir(project_id))
 
 
+def ensure_project_mcp_best_practices(project_id: str) -> None:
+    """Create root MCP best-practices Markdown for agents if missing."""
+
+    from app.mcp_best_practices import write_mcp_best_practices_if_absent
+
+    write_mcp_best_practices_if_absent(project_dir(project_id))
+
+
 def ensure_project_identity_file(project_id: str) -> None:
     """Write `.igltf/project-id` in the workspace so MCP/IDE can resolve the hub UUID."""
 
@@ -118,6 +126,7 @@ def ensure_project_layout(project_id: str) -> None:
     staging_dir(project_id).mkdir(parents=True, exist_ok=True)
     ensure_project_mcp_json(project_id)
     ensure_project_cursor_rules(project_id)
+    ensure_project_mcp_best_practices(project_id)
     ensure_project_identity_file(project_id)
 
 

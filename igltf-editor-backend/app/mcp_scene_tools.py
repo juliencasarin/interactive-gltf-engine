@@ -5,6 +5,12 @@ from __future__ import annotations
 from typing import Any
 
 from app.editor_session import EditorSessionError, EditorSessionState, editor_session_hub
+from app.transform_audit import (
+    TRANSFORM_CONVENTIONS,
+    build_transform_payload,
+    get_transform_conventions,
+)
+from app.transform_conversion import convert_transform_convention
 
 
 def build_session_capabilities(sess: EditorSessionState | None) -> dict[str, Any]:
@@ -125,7 +131,36 @@ def _node_kind(node: dict[str, Any]) -> str:
     return "empty"
 
 
-def build_scene_hierarchy(snapshot: dict[str, Any], *, include_descriptions: bool = False) -> list[dict[str, Any]]:
+def _transform_meta() -> dict[str, Any]:
+    return {
+        "rotationOrder": TRANSFORM_CONVENTIONS["rotationOrder"],
+        "rotationUnits": TRANSFORM_CONVENTIONS["rotationUnits"],
+        "coordinateSystem": TRANSFORM_CONVENTIONS["coordinateSystem"],
+    }
+
+
+def _scene_nodes(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    scene = snapshot.get("scene")
+    if not isinstance(scene, dict):
+        return []
+    nodes = scene.get("nodes")
+    return nodes if isinstance(nodes, list) else []
+
+
+def _find_scene_node(snapshot: dict[str, Any], node_id: str) -> dict[str, Any] | None:
+    for raw in _scene_nodes(snapshot):
+        if isinstance(raw, dict) and raw.get("id") == node_id:
+            return raw
+    return None
+
+
+def build_scene_hierarchy(
+    snapshot: dict[str, Any],
+    *,
+    include_descriptions: bool = False,
+    include_transforms: bool = False,
+    transform_space: str = "both",
+) -> list[dict[str, Any]]:
     scene = snapshot.get("scene")
     if not isinstance(scene, dict):
         return []
@@ -156,6 +191,14 @@ def build_scene_hierarchy(snapshot: dict[str, Any], *, include_descriptions: boo
         }
         if include_descriptions and has_desc:
             row["description"] = desc.strip()
+        if include_transforms:
+            space = transform_space if transform_space in ("local", "world", "both") else "both"
+            row["transforms"] = build_transform_payload(
+                raw,
+                nodes,
+                include_matrix=False,
+                transform_space=space,  # type: ignore[arg-type]
+            )
         out.append(row)
     return out
 
@@ -167,6 +210,8 @@ def igltf_get_editor_session_status(project_id: str) -> dict[str, Any]:
 def igltf_list_scene_hierarchy(
     project_id: str,
     include_descriptions: bool = False,
+    include_transforms: bool = False,
+    transform_space: str = "both",
 ) -> dict[str, Any]:
     snap = _require_live(project_id)
     if "error" in snap:
@@ -176,7 +221,13 @@ def igltf_list_scene_hierarchy(
         {
             "projectId": project_id,
             "revision": editor_session_hub.require_live(project_id).revision,
-            "nodes": build_scene_hierarchy(snap, include_descriptions=include_descriptions),
+            "nodes": build_scene_hierarchy(
+                snap,
+                include_descriptions=include_descriptions,
+                include_transforms=include_transforms,
+                transform_space=transform_space,
+            ),
+            **(_transform_meta() if include_transforms else {}),
         },
     )
 
@@ -318,6 +369,119 @@ def igltf_get_node_details(project_id: str, node_id: str) -> dict[str, Any]:
     return {"error": {"code": "node_not_found", "message": f"Node {node_id!r} not found"}}
 
 
+def igltf_get_node_transform(
+    project_id: str,
+    node_id: str,
+    include_matrix: bool = True,
+) -> dict[str, Any]:
+    snap = _require_live(project_id)
+    if "error" in snap:
+        return snap
+    raw = _find_scene_node(snap, node_id)
+    if not raw:
+        return {"error": {"code": "node_not_found", "message": f"Node {node_id!r} not found"}}
+    nodes = _scene_nodes(snap)
+    return _with_session_capabilities(
+        project_id,
+        {
+            "projectId": project_id,
+            "revision": editor_session_hub.require_live(project_id).revision,
+            "nodeId": node_id,
+            "transforms": build_transform_payload(
+                raw,
+                nodes,
+                include_matrix=include_matrix,
+                transform_space="both",
+            ),
+            **_transform_meta(),
+        },
+    )
+
+
+def igltf_get_nodes_details(
+    project_id: str,
+    node_ids: list[str],
+    include_transforms: bool = True,
+) -> dict[str, Any]:
+    snap = _require_live(project_id)
+    if "error" in snap:
+        return snap
+    if not node_ids:
+        return {"error": {"code": "invalid_argument", "message": "node_ids must be a non-empty array"}}
+
+    nodes = _scene_nodes(snap)
+    by_id = {str(n.get("id")): n for n in nodes if isinstance(n, dict) and isinstance(n.get("id"), str)}
+    rows: list[dict[str, Any]] = []
+    missing: list[str] = []
+    for nid in node_ids:
+        raw = by_id.get(nid)
+        if not raw:
+            missing.append(nid)
+            continue
+        atts = raw.get("interactionAttachments")
+        scripts: list[dict[str, Any]] = []
+        if isinstance(atts, list):
+            for a in atts:
+                if not isinstance(a, dict):
+                    continue
+                scripts.append(
+                    {
+                        "id": a.get("id"),
+                        "scriptAssetRef": a.get("scriptAssetRef"),
+                        "serializedProps": a.get("serializedProps"),
+                    }
+                )
+        row: dict[str, Any] = {
+            "id": raw.get("id"),
+            "name": raw.get("name"),
+            "description": raw.get("description"),
+            "parentId": raw.get("parentId"),
+            "position": raw.get("position"),
+            "rotation": raw.get("rotation"),
+            "scale": raw.get("scale"),
+            "assetRef": raw.get("assetRef"),
+            "sourceAssetRef": raw.get("sourceAssetRef"),
+            "sourceGltfNodeIndex": raw.get("sourceGltfNodeIndex"),
+            "sourcePlacementId": raw.get("sourcePlacementId"),
+            "visible": raw.get("visible") is not False,
+            "layerId": raw.get("layerId"),
+            "authoringBounds": raw.get("authoringBounds"),
+            "interactionAttachments": scripts,
+            "nodeKind": _node_kind(raw),
+        }
+        if include_transforms:
+            row["transforms"] = build_transform_payload(
+                raw,
+                nodes,
+                include_matrix=True,
+                transform_space="both",
+            )
+        rows.append(row)
+
+    out: dict[str, Any] = {
+        "projectId": project_id,
+        "revision": editor_session_hub.require_live(project_id).revision,
+        "nodes": rows,
+    }
+    if missing:
+        out["missingNodeIds"] = missing
+    if include_transforms:
+        out.update(_transform_meta())
+    return _with_session_capabilities(project_id, out)
+
+
+def igltf_get_transform_conventions() -> dict[str, Any]:
+    return {"conventions": get_transform_conventions()}
+
+
+def igltf_convert_transform_convention(
+    source: str,
+    target: str,
+    transform: dict[str, Any],
+) -> dict[str, Any]:
+    return convert_transform_convention(source, target, transform)
+
+
 async def _dispatch(
     project_id: str,
     op: str,
@@ -345,6 +509,25 @@ async def _dispatch(
         return {"error": {"code": e.code, "message": e.message}}
 
 
+async def igltf_apply_transform_batch(
+    project_id: str,
+    updates: list[dict[str, Any]],
+    space: str = "local",
+    dry_run: bool = False,
+    transaction_label: str | None = None,
+) -> dict[str, Any]:
+    if not isinstance(updates, list) or not updates:
+        return {"error": {"code": "invalid_argument", "message": "updates must be a non-empty array"}}
+    params: dict[str, Any] = {"updates": updates, "space": space, "dry_run": dry_run}
+    if transaction_label:
+        params["transaction_label"] = transaction_label
+    return await _dispatch(project_id, "apply_transform_batch", params)
+
+
+async def igltf_undo_last_editor_change(project_id: str) -> dict[str, Any]:
+    return await _dispatch(project_id, "undo_last_change", {})
+
+
 async def igltf_set_node_transform(
     project_id: str,
     node_id: str,
@@ -361,6 +544,22 @@ async def igltf_set_node_transform(
     if scale is not None:
         params["scale"] = scale
     return await _dispatch(project_id, "set_node_transform", params)
+
+
+async def igltf_create_empty_node(
+    project_id: str,
+    parent_id: str | None = None,
+    name: str | None = None,
+    position: list[float] | None = None,
+) -> dict[str, Any]:
+    params: dict[str, Any] = {}
+    if parent_id is not None:
+        params["parentId"] = parent_id
+    if name is not None:
+        params["name"] = name
+    if position is not None:
+        params["position"] = position
+    return await _dispatch(project_id, "create_empty_node", params)
 
 
 async def igltf_reparent_node(
@@ -785,6 +984,48 @@ async def igltf_measure_asset_bounds(
         "measure_asset_bounds",
         params,
         require_scene_edit=persist,
+    )
+
+
+async def igltf_measure_scene_subtree_bounds(
+    project_id: str,
+    node_id: str,
+    space: str = "world",
+    persist: bool = False,
+) -> dict[str, Any]:
+    params: dict[str, Any] = {"nodeId": node_id, "space": space, "persist": persist}
+    return await _dispatch(
+        project_id,
+        "measure_scene_subtree_bounds",
+        params,
+        require_scene_edit=persist,
+    )
+
+
+async def igltf_compare_bounds(
+    project_id: str,
+    a: str,
+    b: str,
+    target: str = "node",
+    space: str = "world",
+) -> dict[str, Any]:
+    if target not in ("node", "subtree", "asset"):
+        return {"error": {"code": "invalid_argument", "message": "target must be node, subtree, or asset"}}
+    params: dict[str, Any] = {"a": a, "b": b, "target": target, "space": space}
+    return await _dispatch(
+        project_id,
+        "compare_bounds",
+        params,
+        require_scene_edit=False,
+    )
+
+
+async def igltf_get_viewport_camera_summary(project_id: str) -> dict[str, Any]:
+    return await _dispatch(
+        project_id,
+        "get_viewport_camera_summary",
+        {},
+        require_scene_edit=False,
     )
 
 

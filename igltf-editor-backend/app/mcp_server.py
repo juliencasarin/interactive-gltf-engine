@@ -5,15 +5,24 @@ import logging
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.server import StreamableHTTPASGIApp
 
+from app.assets_disk_sync import import_gltf_asset_from_absolute_path
 from app.authoring_kit_fs import list_framework_kit_files_rel, read_framework_kit_file, resolve_authoring_kit_root
 from app.mcp_scene_tools import (
     igltf_add_script_to_node,
+    igltf_apply_transform_batch,
+    igltf_compare_bounds,
+    igltf_convert_transform_convention,
+    igltf_create_empty_node,
     igltf_delete_nodes,
     igltf_get_bounds_metadata,
     igltf_get_descriptions,
     igltf_get_editor_session_status,
     igltf_get_node_details,
+    igltf_get_node_transform,
+    igltf_get_nodes_details,
     igltf_get_script_attachment_inputs,
+    igltf_get_transform_conventions,
+    igltf_get_viewport_camera_summary,
     igltf_instantiate_asset,
     igltf_introspect_script_inputs,
     igltf_list_assets,
@@ -21,6 +30,7 @@ from app.mcp_scene_tools import (
     igltf_list_scene_hierarchy,
     igltf_measure_asset_bounds,
     igltf_measure_scene_node_bounds,
+    igltf_measure_scene_subtree_bounds,
     igltf_remove_script_from_node,
     igltf_rename_node,
     igltf_reparent_node,
@@ -29,6 +39,7 @@ from app.mcp_scene_tools import (
     igltf_set_node_transform,
     igltf_set_node_visibility,
     igltf_set_script_inputs,
+    igltf_undo_last_editor_change,
     igltf_update_script_on_node,
 )
 from app.version_info import ENGINE_VERSION
@@ -118,10 +129,20 @@ def mcp_resolve_project_id(
 
 
 @framework_fast_mcp.tool(name="igltf_list_scene_hierarchy")
-def mcp_list_scene_hierarchy(project_id: str, include_descriptions: bool = False) -> dict[str, object]:
-    """Compact scene tree from the live editor session. Includes sessionCapabilities and mutationNotice when read-only."""
+def mcp_list_scene_hierarchy(
+    project_id: str,
+    include_descriptions: bool = False,
+    include_transforms: bool = False,
+    transform_space: str = "both",
+) -> dict[str, object]:
+    """Compact scene tree from the live editor session. Optionally includes local/world transforms per node."""
 
-    return igltf_list_scene_hierarchy(project_id, include_descriptions=include_descriptions)
+    return igltf_list_scene_hierarchy(
+        project_id,
+        include_descriptions=include_descriptions,
+        include_transforms=include_transforms,
+        transform_space=transform_space,
+    )
 
 
 @framework_fast_mcp.tool(name="igltf_list_assets")
@@ -129,6 +150,27 @@ def mcp_list_assets(project_id: str) -> dict[str, object]:
     """Asset catalog from the live editor session."""
 
     return igltf_list_assets(project_id)
+
+
+@framework_fast_mcp.tool(name="igltf_import_gltf_asset")
+def mcp_import_gltf_asset(
+    project_id: str,
+    source_path: str,
+    logical_name: str | None = None,
+    display_name: str | None = None,
+) -> dict[str, object]:
+    """
+    Copy an absolute .glb/.gltf file path into the project's assets/ folder and sync the asset catalog.
+    Optional logical_name/display_name set a stable catalog name (resolved by name in main.json).
+    Does not mutate the scene; instantiate the returned assetId separately when needed.
+    """
+
+    return import_gltf_asset_from_absolute_path(
+        project_id,
+        source_path,
+        logical_name=logical_name,
+        display_name=display_name,
+    )
 
 
 @framework_fast_mcp.tool(name="igltf_get_descriptions")
@@ -147,6 +189,46 @@ def mcp_get_node_details(project_id: str, node_id: str) -> dict[str, object]:
     """Full details for one scene node from the live session."""
 
     return igltf_get_node_details(project_id, node_id)
+
+
+@framework_fast_mcp.tool(name="igltf_get_node_transform")
+def mcp_get_node_transform(
+    project_id: str,
+    node_id: str,
+    include_matrix: bool = True,
+) -> dict[str, object]:
+    """Local and world TRS (+ optional 4x4 world matrix) for one node from the live snapshot."""
+
+    return igltf_get_node_transform(project_id, node_id, include_matrix=include_matrix)
+
+
+@framework_fast_mcp.tool(name="igltf_get_nodes_details")
+def mcp_get_nodes_details(
+    project_id: str,
+    node_ids: list[str],
+    include_transforms: bool = True,
+) -> dict[str, object]:
+    """Batch node details (and optional transforms) from the live snapshot."""
+
+    return igltf_get_nodes_details(project_id, node_ids, include_transforms=include_transforms)
+
+
+@framework_fast_mcp.tool(name="igltf_get_transform_conventions")
+def mcp_get_transform_conventions() -> dict[str, object]:
+    """Coordinate system, rotation order (XYZ radians), and storage conventions for igltf-editor transforms."""
+
+    return igltf_get_transform_conventions()
+
+
+@framework_fast_mcp.tool(name="igltf_convert_transform_convention")
+def mcp_convert_transform_convention(
+    source: str,
+    target: str,
+    transform: dict[str, object],
+) -> dict[str, object]:
+    """Pure conversion between transform conventions (e.g. unity_lh_y_up -> gltf_rh_y_up)."""
+
+    return igltf_convert_transform_convention(source, target, transform)  # type: ignore[arg-type]
 
 
 @framework_fast_mcp.tool(name="igltf_introspect_script_inputs")
@@ -203,6 +285,64 @@ async def mcp_measure_asset_bounds(
     return await igltf_measure_asset_bounds(project_id, asset_id, persist=persist)
 
 
+@framework_fast_mcp.tool(name="igltf_measure_scene_subtree_bounds")
+async def mcp_measure_scene_subtree_bounds(
+    project_id: str,
+    node_id: str,
+    space: str = "world",
+    persist: bool = False,
+) -> dict[str, object]:
+    """Union viewport bounds for a node and all descendants."""
+
+    return await igltf_measure_scene_subtree_bounds(project_id, node_id, space=space, persist=persist)
+
+
+@framework_fast_mcp.tool(name="igltf_compare_bounds")
+async def mcp_compare_bounds(
+    project_id: str,
+    a: str,
+    b: str,
+    target: str = "node",
+    space: str = "world",
+) -> dict[str, object]:
+    """Compare viewport-measured bounds of two nodes, subtrees, or catalog assets."""
+
+    return await igltf_compare_bounds(project_id, a, b, target=target, space=space)
+
+
+@framework_fast_mcp.tool(name="igltf_get_viewport_camera_summary")
+async def mcp_get_viewport_camera_summary(project_id: str) -> dict[str, object]:
+    """Editor viewport camera pose, clip planes, orbit target, and visible scene roots."""
+
+    return await igltf_get_viewport_camera_summary(project_id)
+
+
+@framework_fast_mcp.tool(name="igltf_apply_transform_batch")
+async def mcp_apply_transform_batch(
+    project_id: str,
+    updates: list[dict[str, object]],
+    space: str = "local",
+    dry_run: bool = False,
+    transaction_label: str | None = None,
+) -> dict[str, object]:
+    """Atomically apply multiple transform updates (dry_run previews without mutating)."""
+
+    return await igltf_apply_transform_batch(
+        project_id,
+        updates,  # type: ignore[arg-type]
+        space=space,
+        dry_run=dry_run,
+        transaction_label=transaction_label,
+    )
+
+
+@framework_fast_mcp.tool(name="igltf_undo_last_editor_change")
+async def mcp_undo_last_editor_change(project_id: str) -> dict[str, object]:
+    """Undo the last editor change (single step on the editor undo stack)."""
+
+    return await igltf_undo_last_editor_change(project_id)
+
+
 @framework_fast_mcp.tool(name="igltf_set_node_transform")
 async def mcp_set_node_transform(
     project_id: str,
@@ -217,6 +357,18 @@ async def mcp_set_node_transform(
     return await igltf_set_node_transform(
         project_id, node_id, position=position, rotation=rotation, scale=scale, space=space
     )
+
+
+@framework_fast_mcp.tool(name="igltf_create_empty_node")
+async def mcp_create_empty_node(
+    project_id: str,
+    parent_id: str | None = None,
+    name: str | None = None,
+    position: list[float] | None = None,
+) -> dict[str, object]:
+    """Create an empty scene node under parent_id (or root). Requires canMutateScene."""
+
+    return await igltf_create_empty_node(project_id, parent_id=parent_id, name=name, position=position)
 
 
 @framework_fast_mcp.tool(name="igltf_reparent_node")

@@ -1,4 +1,5 @@
 import type { ProjectFileV2 } from '@/editor/types'
+import type { ProjectAssetEntry } from '@/editor/types'
 
 export function getApiBase(): string {
   const v = import.meta.env.VITE_API_BASE_URL
@@ -79,6 +80,18 @@ export async function fetchDocument(projectId: string): Promise<ProjectFileV2 | 
   if (res.status === 404) return null
   if (!res.ok) throw new Error((await res.text()) || `GET document ${res.status}`)
   return res.json() as Promise<ProjectFileV2>
+}
+
+export type AssetCatalogSnapshot = {
+  assets: ProjectAssetEntry[]
+  assetFolders?: string[]
+}
+
+export async function fetchAssetCatalog(projectId: string): Promise<AssetCatalogSnapshot> {
+  const base = getApiBase()
+  const res = await fetch(`${base}/projects/${encodeURIComponent(projectId)}/assets/catalog`)
+  if (!res.ok) throw new Error((await res.text()) || `GET asset catalog ${res.status}`)
+  return res.json() as Promise<AssetCatalogSnapshot>
 }
 
 export async function putDocument(projectId: string, doc: ProjectFileV2): Promise<ProjectFileV2> {

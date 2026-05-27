@@ -10,7 +10,7 @@ from starlette.testclient import TestClient
 import app.assets_disk_sync as ads
 import app.apply_document as appl
 import app.storage as storage
-from app.assets_watch import AssetsWatchHub
+from app.assets_watch import AssetsWatchHub, _workspace_disk_watch_filter
 from app.models import EditorSettings, ProjectAsset, ProjectDocumentV2, Scene, SceneNode
 
 
@@ -160,6 +160,73 @@ def test_apply_document_keeps_asset_after_prior_disk_sync(monkeypatch: pytest.Mo
     assert Path(ws / rel).is_file()
 
 
+def test_import_gltf_asset_copies_external_file_and_syncs_catalog(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    ws = tmp_path / "proj-import"
+    _bind_workspace(monkeypatch, ws)
+    (ws / "project.json").write_text(_minimal_doc().model_dump_json(indent=2), encoding="utf-8")
+    source = tmp_path / "external" / "Robot.glb"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"glTF binary placeholder")
+
+    result = ads.import_gltf_asset_from_absolute_path("pid-any", str(source))
+
+    assert "error" not in result
+    assert source.is_file()
+    imported = result["imported"]
+    assert imported["type"] == "asset_added"
+    assert imported["priorNameOnDisk"] == "Robot.glb"
+
+    reloaded = ProjectDocumentV2.model_validate_json((ws / "project.json").read_text(encoding="utf-8"))
+    assert len(reloaded.assets) == 1
+    asset = reloaded.assets[0]
+    assert asset.assetKind == "gltf"
+    assert asset.name == "Robot"
+    assert asset.relativePath == imported["relativePath"]
+    assert (ws / asset.relativePath).is_file()
+
+
+def test_import_gltf_asset_sets_logical_name_on_catalog(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    ws = tmp_path / "proj-import-named"
+    _bind_workspace(monkeypatch, ws)
+    (ws / "project.json").write_text(_minimal_doc().model_dump_json(indent=2), encoding="utf-8")
+    source = tmp_path / "external" / "Robot.glb"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"glTF binary placeholder")
+
+    result = ads.import_gltf_asset_from_absolute_path(
+        "pid-any",
+        str(source),
+        logical_name="MainRobot",
+        display_name="Main Robot",
+    )
+
+    assert "error" not in result
+    assert result["catalogName"] == "MainRobot"
+    reloaded = ProjectDocumentV2.model_validate_json((ws / "project.json").read_text(encoding="utf-8"))
+    assert reloaded.assets[0].name == "MainRobot"
+
+
+def test_import_gltf_asset_rejects_relative_or_non_gltf_paths(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    ws = tmp_path / "proj-import-invalid"
+    _bind_workspace(monkeypatch, ws)
+    (ws / "project.json").write_text(_minimal_doc().model_dump_json(indent=2), encoding="utf-8")
+    source = tmp_path / "external" / "notes.txt"
+    source.parent.mkdir(parents=True)
+    source.write_text("not a model", encoding="utf-8")
+
+    relative = ads.import_gltf_asset_from_absolute_path("pid-any", "Robot.glb")
+    unsupported = ads.import_gltf_asset_from_absolute_path("pid-any", str(source))
+
+    assert relative["error"]["code"] == "invalid_argument"
+    assert unsupported["error"]["code"] == "unsupported_file_type"
+
+
 def test_apply_document_persists_editor_settings(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     ws = tmp_path / "proj-settings"
     _bind_workspace(monkeypatch, ws)
@@ -197,3 +264,11 @@ def test_websocket_assets_watch_sends_hello(
         assert msg.get("channel") == "assets_disk"
         assert msg.get("payload", {}).get("hello") is True
         assert isinstance(msg.get("payload", {}).get("events"), list)
+        assert isinstance(msg.get("payload", {}).get("assets"), list)
+        assert isinstance(msg.get("payload", {}).get("assetFolders"), list)
+
+
+def test_assets_watch_filter_ignores_project_json(tmp_path: Path) -> None:
+    wf = _workspace_disk_watch_filter(tmp_path)
+    assert wf(None, str(tmp_path / "assets" / "Door.js")) is True  # type: ignore[arg-type]
+    assert wf(None, str(tmp_path / "project.json")) is False  # type: ignore[arg-type]

@@ -86,7 +86,10 @@ MCP tool dispatched via backend:
 
 | `op` | Maps to MCP tool |
 |------|------------------|
+| `create_empty_node` | `igltf_create_empty_node` |
 | `set_node_transform` | `igltf_set_node_transform` |
+| `apply_transform_batch` | `igltf_apply_transform_batch` |
+| `undo_last_change` | `igltf_undo_last_editor_change` |
 | `reparent_node` | `igltf_reparent_node` |
 | `rename_node` | `igltf_rename_node` |
 | `set_node_visibility` | `igltf_set_node_visibility` |
@@ -97,9 +100,22 @@ MCP tool dispatched via backend:
 | `remove_script_attachment` | `igltf_remove_script_from_node` |
 | `update_script_attachment` | `igltf_update_script_on_node` |
 | `measure_scene_node_bounds` | `igltf_measure_scene_node_bounds` |
+| `measure_scene_subtree_bounds` | `igltf_measure_scene_subtree_bounds` |
+| `compare_bounds` | `igltf_compare_bounds` |
 | `measure_asset_bounds` | `igltf_measure_asset_bounds` |
+| `get_viewport_camera_summary` | `igltf_get_viewport_camera_summary` |
 
 Measure ops with **`persist: true`** count as scene mutations (require allow flag).
+
+`apply_transform_batch` with **`dry_run: true`** is read-only (preview resolved local/world TRS without mutating).
+
+### Transform conventions (MCP audit)
+
+- **Coordinate system:** right-handed, **Y-up**, lengths in **meters** (glTF / igltf-editor).
+- **Stored rotations:** Euler **XYZ** in **radians** on each node (`position` / `rotation` / `scale` are **local** under the parent).
+- **`set_node_transform` / batch with `space: "world"`:** world Euler XYZ radians are converted to local TRS under the parent before persistence.
+- **Read-only audit (no live WebSocket):** `igltf_get_node_transform`, `igltf_get_nodes_details`, `igltf_list_scene_hierarchy` (`include_transforms`), `igltf_get_transform_conventions` — world TRS composed from the live snapshot in the backend.
+- **Convention conversion (pure):** `igltf_convert_transform_convention` (e.g. `unity_lh_y_up` → `gltf_rh_y_up`).
 
 Implementation: **`dispatchEditorMcpCommand`** in `editorMcpCommands.ts` → `EditorContext` mutations. Viewport measure uses Three.js scene registry (`editorViewportBounds.ts`).
 

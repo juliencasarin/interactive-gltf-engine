@@ -13,7 +13,7 @@ from typing import Any
 from starlette.websockets import WebSocket, WebSocketDisconnect
 from watchfiles import Change, awatch
 
-from app.assets_disk_sync import sync_assets_from_disk_async
+from app.assets_disk_sync import load_asset_catalog_snapshot, sync_assets_from_disk_async
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +34,6 @@ def _workspace_disk_watch_filter(workspace: Path):
         except ValueError:
             return False
         parts = rel.parts
-        if len(parts) == 1 and parts[0] == "project.json":
-            return True
         if parts and parts[0] == "assets" and path.suffix.lower() in _ASSET_WATCH_SUFFIXES:
             return True
         return False
@@ -72,9 +70,10 @@ class AssetsWatchHub:
         try:
             async for _changes in awatch(base, debounce=300, watch_filter=filt):
                 events = await sync_assets_from_disk_async(project_id)
+                catalog = load_asset_catalog_snapshot(project_id)
                 await self._broadcast(
                     project_id,
-                    {"channel": "assets_disk", "payload": {"events": events}},
+                    {"channel": "assets_disk", "payload": {"events": events, **catalog}},
                 )
         except asyncio.CancelledError:
             raise
@@ -137,10 +136,11 @@ async def handle_assets_watch_websocket(project_id: str, websocket: WebSocket) -
     await assets_watch_hub.subscribe(project_id, websocket)
     try:
         initial = await sync_assets_from_disk_async(project_id)
+        catalog = load_asset_catalog_snapshot(project_id)
         await websocket.send_json(
             {
                 "channel": "assets_disk",
-                "payload": {"hello": True, "events": initial},
+                "payload": {"hello": True, "events": initial, **catalog},
             },
         )
     except Exception:  # pragma: no cover

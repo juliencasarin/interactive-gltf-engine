@@ -12,10 +12,12 @@ Schema: [igltf-editor-project.md](igltf-editor-project.md).
 
 1. **Viewport** — Three.js scene registry tracks loaded meshes per node/asset (`authoringBounds.ts`, `editorViewportBounds.ts`)
 2. **MCP read** — `igltf_get_bounds_metadata` returns stored metadata from live session snapshot
-3. **MCP measure** — `igltf_measure_scene_node_bounds` / `igltf_measure_asset_bounds`:
+3. **MCP measure** — `igltf_measure_scene_node_bounds` / `igltf_measure_scene_subtree_bounds` / `igltf_measure_asset_bounds`:
    - Computes AABB + sphere from viewport (`space`: `local` | `world` for nodes)
+   - `igltf_compare_bounds` — delta center/size, distance, volume ratio between two measured targets
    - `persist: false` → return only (read-like)
    - `persist: true` → writes to node/asset in live session (**requires Allow scene edition**)
+4. **MCP camera** — `igltf_get_viewport_camera_summary` (pose + visible roots; no image capture)
 
 ## Storage shape
 

@@ -36,12 +36,17 @@ import type { EditorMcpCommandHandlers } from './editorMcpCommands'
 import {
   measureAssetBoundsFromViewport,
   measureSceneNodeBoundsFromViewport,
+  measureSceneSubtreeBoundsFromViewport,
 } from './editorViewportBounds'
 import { inferAssetKindFromPath, isGltfAssetEntry } from './assetUtils'
 import {
   applyReparentTransform,
+  getLocalTRS,
+  getWorldTRS,
+  setTransformInSpace,
   type ReparentOptions,
   type TransformSpace,
+  type TRS,
 } from './transformMath'
 
 export type { ReparentOptions, TransformSpace } from './transformMath'
@@ -306,6 +311,30 @@ function docToEditorState(doc: ProjectFileV2): {
   return { nodes, assets, assetFolders, editorSettings }
 }
 
+function normalizeAssetCatalogSnapshot(payload: Pick<AssetsDiskWsPayload, 'assets' | 'assetFolders'>): {
+  assets: ProjectAssetEntry[]
+  assetFolders: string[]
+} | null {
+  if (!Array.isArray(payload.assets)) return null
+  const assets: ProjectAssetEntry[] = payload.assets.map((a) => ({
+    assetId: a.assetId,
+    relativePath: a.relativePath,
+    name: a.name,
+    ...(a.description?.trim() ? { description: a.description.trim() } : {}),
+    ...(a.authoringBounds ? { authoringBounds: { ...a.authoringBounds } } : {}),
+    ...(a.logicalFolder ? { logicalFolder: normalizeLogicalFolder(a.logicalFolder) } : {}),
+    ...(a.assetKind ? { assetKind: a.assetKind } : {}),
+    ...(a.scriptRole ? { scriptRole: a.scriptRole } : {}),
+    ...(a.interactionKind ? { interactionKind: a.interactionKind } : {}),
+    ...(a.sourceText !== undefined ? { sourceText: a.sourceText } : {}),
+    ...(a.scriptExports?.length ? { scriptExports: [...a.scriptExports] } : {}),
+    ...(a.scriptDependsOnAssetIds?.length ? { scriptDependsOnAssetIds: [...a.scriptDependsOnAssetIds] } : {}),
+  }))
+  const rawFolders = Array.isArray(payload.assetFolders) ? payload.assetFolders : []
+  const assetFolders = [...new Set(rawFolders.map(normalizeLogicalFolder).filter(Boolean))].sort()
+  return { assets, assetFolders }
+}
+
 export type SceneNodePlacementOptions = {
   parentId?: string
   worldPosition?: Vec3
@@ -318,6 +347,8 @@ export type ViewportToolMode = 'select' | 'translate' | 'rotate' | 'scale'
 type AssetsDiskWsPayload = {
   hello?: boolean
   events?: { type: string; assetId?: string; relativePath?: string }[]
+  assets?: ProjectAssetEntry[]
+  assetFolders?: string[]
   error?: string
 }
 
@@ -584,11 +615,13 @@ export function EditorProvider({
   const projectAssetsDocRef = useRef(projectAssets)
   const assetFoldersDocRef = useRef(assetFoldersExplicit)
   const editorSettingsDocRef = useRef(editorSettings)
+  const dirtyRef = useRef(dirty)
   const sessionRevisionRef = useRef(sessionRevision)
   nodesDocRef.current = nodes
   projectAssetsDocRef.current = projectAssets
   assetFoldersDocRef.current = assetFoldersExplicit
   editorSettingsDocRef.current = editorSettings
+  dirtyRef.current = dirty
   sessionRevisionRef.current = sessionRevision
 
   const bumpSessionRevision = useCallback(() => {
@@ -883,6 +916,26 @@ export function EditorProvider({
     }
   }, [projectId])
 
+  const applyAssetCatalogSnapshot = useCallback(
+    (payload: Pick<AssetsDiskWsPayload, 'assets' | 'assetFolders'>) => {
+      const catalog = normalizeAssetCatalogSnapshot(payload)
+      if (!catalog) return
+      setProjectAssets(catalog.assets)
+      setAssetFoldersExplicit(catalog.assetFolders)
+      setAssetFetchRev((r) => r + 1)
+      bumpSessionRevision()
+      if (!dirtyRef.current) {
+        baselineRef.current = baselineKey(
+          nodesDocRef.current,
+          catalog.assets,
+          catalog.assetFolders,
+          editorSettingsDocRef.current,
+        )
+      }
+    },
+    [bumpSessionRevision],
+  )
+
   useEffect(() => {
     if (!isApiConfigured()) {
       setAssetsDiskWatch('idle')
@@ -893,29 +946,6 @@ export function EditorProvider({
     let ws: WebSocket | null = null
     let retryTimer: ReturnType<typeof setTimeout> | undefined
     let attempt = 0
-
-    const refreshFromServer = async () => {
-      hydrateEpochRef.current += 1
-      const gen = hydrateEpochRef.current
-      try {
-        const doc = await fetchDocument(projectIdRef.current)
-        if (cancelled || gen !== hydrateEpochRef.current) return
-        if (doc && doc.version === 2) {
-          const { nodes: nn, assets: na, assetFolders: nf, editorSettings: nes } = docToEditorState(doc)
-          setNodes(nn)
-          setProjectAssets(na)
-          setAssetFoldersExplicit(nf)
-          setEditorSettings(nes)
-          baselineRef.current = baselineKey(nn, na, nf, nes)
-          setDirty(false)
-          clearHistoryStacks()
-          bumpSessionRevision()
-          setAssetFetchRev((r) => r + 1)
-        }
-      } catch {
-        /* transient */
-      }
-    }
 
     const scheduleReconnect = () => {
       if (cancelled) return
@@ -955,12 +985,10 @@ export function EditorProvider({
             return
           }
           if (msg.payload.hello) {
-            const evs = msg.payload.events
-            if (!Array.isArray(evs) || evs.length === 0) return
-            void refreshFromServer()
+            applyAssetCatalogSnapshot(msg.payload)
             return
           }
-          void refreshFromServer()
+          applyAssetCatalogSnapshot(msg.payload)
         } catch {
           /* ignore */
         }
@@ -975,7 +1003,7 @@ export function EditorProvider({
       if (ws && ws.readyState === WebSocket.OPEN) ws.close()
       setAssetsDiskWatch('idle')
     }
-  }, [projectId, clearHistoryStacks])
+  }, [projectId, applyAssetCatalogSnapshot])
 
   const updateNode = useCallback(
     (
@@ -1019,6 +1047,72 @@ export function EditorProvider({
     },
     [pushUndo, catalogueGlbIdSet, bumpSessionRevision],
   )
+
+  const applyTransformBatch = useCallback(
+    (
+      updates: Array<{
+        nodeId: string
+        position?: Vec3
+        rotation?: Vec3
+        scale?: Vec3
+      }>,
+      space: TransformSpace,
+      opts?: { dryRun?: boolean },
+    ): {
+      wouldAffect: number
+      resolvedTransforms: Array<{ nodeId: string; local: TRS; world?: TRS }>
+      errors: Array<{ nodeId: string; code: string; message: string }>
+    } => {
+      const cur = nodesDocRef.current
+      let working = cur.map((n) => ({ ...n }))
+      const errors: Array<{ nodeId: string; code: string; message: string }> = []
+      const resolvedTransforms: Array<{ nodeId: string; local: TRS; world?: TRS }> = []
+
+      for (const u of updates) {
+        const ix = working.findIndex((n) => n.id === u.nodeId)
+        if (ix < 0) {
+          errors.push({
+            nodeId: u.nodeId,
+            code: 'node_not_found',
+            message: `Node ${u.nodeId} not found`,
+          })
+          continue
+        }
+        const node = working[ix]!
+        const patch: Partial<{ position: Vec3; rotation: Vec3; scale: Vec3 }> = {}
+        if (u.position) patch.position = u.position
+        if (u.rotation) patch.rotation = u.rotation
+        if (u.scale) patch.scale = u.scale
+        const applied = setTransformInSpace(node, working, patch, space)
+        working[ix] = { ...node, ...applied }
+        const world = getWorldTRS(working, u.nodeId)
+        resolvedTransforms.push({
+          nodeId: u.nodeId,
+          local: getLocalTRS(working[ix]!),
+          ...(world ? { world } : {}),
+        })
+      }
+
+      if (opts?.dryRun) {
+        return { wouldAffect: resolvedTransforms.length, resolvedTransforms, errors }
+      }
+      if (errors.length) {
+        return { wouldAffect: 0, resolvedTransforms: [], errors }
+      }
+      pushUndo()
+      setNodes(working)
+      setDirty(true)
+      bumpSessionRevision()
+      return { wouldAffect: resolvedTransforms.length, resolvedTransforms, errors }
+    },
+    [pushUndo, bumpSessionRevision],
+  )
+
+  const undoLastChange = useCallback(() => {
+    if (undoStackRef.current.length === 0) return false
+    undo()
+    return true
+  }, [undo])
 
   const addInteractionAttachment = useCallback(
     (nodeId: string, scriptAssetId: string): string => {
@@ -1124,14 +1218,17 @@ export function EditorProvider({
     [placeSceneNodeInHierarchy],
   )
 
-  const createEmptyChild = useCallback((parentId: string) => {
+  const addEmptySceneNode = useCallback((opts?: { parentId?: string; position?: Vec3; name?: string }) => {
+    const rootId = nodesDocRef.current.find((n) => n.parentId === null)?.id ?? 'root'
+    const parentId = opts?.parentId ?? rootId
+    if (!nodesDocRef.current.some((n) => n.id === parentId)) return null
     pushUndo()
     const id = uid()
     const node: EditorNode = {
       id,
-      name: 'Empty',
+      name: opts?.name?.trim() || 'Empty',
       parentId: parentId,
-      position: [0, 0, 0],
+      position: opts?.position ? ([...opts.position] as Vec3) : [0, 0, 0],
       rotation: [0, 0, 0],
       scale: [1, 1, 1],
     }
@@ -1143,7 +1240,13 @@ export function EditorProvider({
       return next
     })
     setDirty(true)
-  }, [pushUndo])
+    bumpSessionRevision()
+    return id
+  }, [pushUndo, bumpSessionRevision])
+
+  const createEmptyChild = useCallback((parentId: string) => {
+    addEmptySceneNode({ parentId })
+  }, [addEmptySceneNode])
 
   const duplicateSceneNode = useCallback(
     (nodeId: string) => {
@@ -1780,12 +1883,16 @@ export function EditorProvider({
       reparentSceneNode,
       placeSceneNodeInHierarchy,
       addSceneNodeFromAsset,
+      addEmptySceneNode,
       deleteSceneSubtrees,
       addInteractionAttachment,
       removeInteractionAttachment,
       updateInteractionAttachment,
       measureSceneNodeBounds: measureSceneNodeBoundsFromViewport,
+      measureSceneSubtreeBounds: measureSceneSubtreeBoundsFromViewport,
       measureAssetBounds: measureAssetBoundsFromViewport,
+      applyTransformBatch,
+      undoLastChange,
       fetchScriptSource: (assetId: string) => fetchAssetSource(projectIdRef.current, assetId),
     }),
     [
@@ -1794,10 +1901,13 @@ export function EditorProvider({
       reparentSceneNode,
       placeSceneNodeInHierarchy,
       addSceneNodeFromAsset,
+      addEmptySceneNode,
       deleteSceneSubtrees,
       addInteractionAttachment,
       removeInteractionAttachment,
       updateInteractionAttachment,
+      applyTransformBatch,
+      undoLastChange,
     ],
   )
 
